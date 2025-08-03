@@ -196,10 +196,19 @@ fn render_target_info(f: &mut Frame, area: Rect, target: &TargetStats) {
 }
 
 fn render_statistics(f: &mut Frame, area: Rect, target: &TargetStats) {
-    let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(area);
+    let has_ssh = target.target.ssh_port.is_some();
+    
+    let chunks = if has_ssh {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(area)
+    } else {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(100)])
+            .split(area)
+    };
 
     if let Some(ping_stats) = &target.ping_stats {
         render_ping_stats(f, chunks[0], ping_stats);
@@ -209,12 +218,14 @@ fn render_statistics(f: &mut Frame, area: Rect, target: &TargetStats) {
         f.render_widget(paragraph, chunks[0]);
     }
 
-    if let Some(ssh_stats) = &target.ssh_stats {
-        render_ssh_stats(f, chunks[1], ssh_stats);
-    } else {
-        let block = Block::default().title("SSH Stats").borders(Borders::ALL);
-        let paragraph = Paragraph::new("No SSH data available").block(block);
-        f.render_widget(paragraph, chunks[1]);
+    if has_ssh {
+        if let Some(ssh_stats) = &target.ssh_stats {
+            render_ssh_stats(f, chunks[1], ssh_stats);
+        } else {
+            let block = Block::default().title("SSH Stats").borders(Borders::ALL);
+            let paragraph = Paragraph::new("No SSH data available").block(block);
+            f.render_widget(paragraph, chunks[1]);
+        }
     }
 }
 
@@ -251,24 +262,29 @@ fn render_ssh_stats(f: &mut Frame, area: Rect, stats: &Statistics) {
 }
 
 fn render_charts(f: &mut Frame, area: Rect, target: &TargetStats) {
+    let has_ssh = target.target.ssh_port.is_some();
+    
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
         .split(area);
 
-    let chart_chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-        .split(chunks[0]);
+    let chart_chunks = if has_ssh {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .split(chunks[0])
+    } else {
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([Constraint::Percentage(100)])
+            .split(chunks[0])
+    };
 
     render_ping_chart(f, chart_chunks[0], target);
     
-    if target.target.ssh_port.is_some() {
+    if has_ssh {
         render_ssh_chart(f, chart_chunks[1], target);
-    } else {
-        let block = Block::default().title("SSH Chart").borders(Borders::ALL);
-        let paragraph = Paragraph::new("SSH monitoring not configured\nAdd ssh_port and ssh_user to target").block(block);
-        f.render_widget(paragraph, chart_chunks[1]);
     }
 
     render_box_plot(f, chunks[1], target);
