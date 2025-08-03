@@ -179,25 +179,6 @@ impl Monitor {
         Ok(())
     }
 
-    pub async fn start_monitoring(&mut self) -> Result<()> {
-        let mut ping_interval = tokio::time::interval(self.ping_interval);
-        let mut ssh_interval = tokio::time::interval(self.ping_interval * 5);
-
-        loop {
-            tokio::select! {
-                _ = ping_interval.tick() => {
-                    if let Err(e) = self.run_ping_cycle().await {
-                        eprintln!("Ping cycle error: {}", e);
-                    }
-                }
-                _ = ssh_interval.tick() => {
-                    if let Err(e) = self.run_ssh_cycle().await {
-                        eprintln!("SSH cycle error: {}", e);
-                    }
-                }
-            }
-        }
-    }
 }
 
 async fn ping_target(ip: &str) -> PingResult {
@@ -227,22 +208,21 @@ async fn ping_target(ip: &str) -> PingResult {
     };
 
     let mut pinger = client.pinger(addr, surge_ping::PingIdentifier(0)).await;
-    let start = Instant::now();
-
-    match pinger.ping(surge_ping::PingSequence(0), &[]).await {
-        Ok(_) => {
-            let latency = start.elapsed().as_millis() as f64;
+    match pinger.ping(surge_ping::PingSequence(1), &[]).await {
+        Ok((_packet, duration)) => {
             PingResult {
                 timestamp,
-                latency_ms: Some(latency),
+                latency_ms: Some(duration.as_millis() as f64),
                 success: true,
             }
         }
-        Err(_) => PingResult {
-            timestamp,
-            latency_ms: None,
-            success: false,
-        },
+        Err(_) => {
+            PingResult {
+                timestamp,
+                latency_ms: None,
+                success: false,
+            }
+        }
     }
 }
 
