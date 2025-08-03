@@ -78,7 +78,10 @@ impl TargetStats {
             .collect();
 
         if !successful_pings.is_empty() {
-            self.ping_stats = Some(calculate_statistics(&successful_pings, self.ping_history.len()));
+            self.ping_stats = Some(calculate_statistics(
+                &successful_pings,
+                self.ping_history.len(),
+            ));
         }
     }
 
@@ -90,7 +93,10 @@ impl TargetStats {
             .collect();
 
         if !successful_ssh.is_empty() {
-            self.ssh_stats = Some(calculate_statistics(&successful_ssh, self.ssh_history.len()));
+            self.ssh_stats = Some(calculate_statistics(
+                &successful_ssh,
+                self.ssh_history.len(),
+            ));
         }
     }
 }
@@ -131,9 +137,7 @@ impl Monitor {
 
         for (index, target_stats) in self.targets.iter().enumerate() {
             let ip = target_stats.target.ip.clone();
-            let handle = tokio::spawn(async move {
-                (index, ping_target(&ip).await)
-            });
+            let handle = tokio::spawn(async move { (index, ping_target(&ip).await) });
             handles.push(handle);
         }
 
@@ -158,9 +162,8 @@ impl Monitor {
                 let user = target_stats.target.ssh_user.clone().unwrap();
                 let timeout = self.ssh_timeout;
 
-                let handle = tokio::spawn(async move {
-                    (index, ssh_test(&ip, port, &user, timeout).await)
-                });
+                let handle =
+                    tokio::spawn(async move { (index, ssh_test(&ip, port, &user, timeout).await) });
                 handles.push(handle);
             }
         }
@@ -199,7 +202,7 @@ impl Monitor {
 
 async fn ping_target(ip: &str) -> PingResult {
     let timestamp = Utc::now();
-    
+
     let addr = match ip.parse::<std::net::IpAddr>() {
         Ok(addr) => addr,
         Err(_) => {
@@ -225,7 +228,7 @@ async fn ping_target(ip: &str) -> PingResult {
 
     let mut pinger = client.pinger(addr, surge_ping::PingIdentifier(0)).await;
     let start = Instant::now();
-    
+
     match pinger.ping(surge_ping::PingSequence(0), &[]).await {
         Ok(_) => {
             let latency = start.elapsed().as_millis() as f64;
@@ -260,7 +263,8 @@ async fn ssh_test(ip: &str, port: u16, _user: &str, timeout: Duration) -> SshRes
             }
             Err(_) => false,
         }
-    }).await;
+    })
+    .await;
 
     match result {
         Ok(true) => {
@@ -308,7 +312,7 @@ fn percentile(sorted_values: &[f64], p: f64) -> f64 {
     if sorted_values.is_empty() {
         return 0.0;
     }
-    
+
     if sorted_values.len() == 1 {
         return sorted_values[0];
     }
