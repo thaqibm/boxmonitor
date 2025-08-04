@@ -1,4 +1,7 @@
 use crate::monitor::{Statistics, TargetStats};
+use crate::ui_failure_charts::{
+    render_all_targets_failure_chart, render_single_target_failure_chart,
+};
 use color_eyre::Result;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
@@ -23,6 +26,7 @@ pub enum PlotView {
     AllTargets,
     PingOnly,
     SshOnly,
+    FailureChart,
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -81,10 +85,11 @@ impl App {
                 if has_ssh {
                     PlotView::SshOnly
                 } else {
-                    PlotView::AllTargets
+                    PlotView::FailureChart
                 }
             }
-            PlotView::SshOnly => PlotView::AllTargets,
+            PlotView::SshOnly => PlotView::FailureChart,
+            PlotView::FailureChart => PlotView::AllTargets,
         };
     }
 }
@@ -362,6 +367,9 @@ fn render_all_targets_charts(
         PlotView::SshOnly => {
             render_all_targets_ssh_chart(f, area, targets);
         }
+        PlotView::FailureChart => {
+            render_all_targets_failure_chart(f, area, targets);
+        }
     }
 }
 
@@ -393,6 +401,9 @@ fn render_single_target_charts(
                 let paragraph = Paragraph::new("SSH monitoring not configured").block(block);
                 f.render_widget(paragraph, chunks[0]);
             }
+        }
+        PlotView::FailureChart => {
+            render_single_target_failure_chart(f, chunks[0], target);
         }
     }
 

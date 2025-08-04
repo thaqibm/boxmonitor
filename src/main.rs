@@ -1,6 +1,7 @@
 mod config;
 mod monitor;
 mod ui;
+mod ui_failure_charts;
 
 use clap::Parser;
 use color_eyre::Result;

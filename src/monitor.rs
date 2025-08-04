@@ -10,6 +10,7 @@ pub struct PingResult {
     pub timestamp: DateTime<Utc>,
     pub latency_ms: Option<f64>,
     pub success: bool,
+    pub failure_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,6 +18,14 @@ pub struct SshResult {
     pub timestamp: DateTime<Utc>,
     pub connection_time_ms: Option<f64>,
     pub success: bool,
+    pub failure_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FailureLog {
+    pub timestamp: DateTime<Utc>,
+    pub failure_type: String, // "ping" or "ssh"
+    pub reason: String,
 }
 
 #[derive(Debug, Clone)]
@@ -24,6 +33,7 @@ pub struct TargetStats {
     pub target: Target,
     pub ping_history: VecDeque<PingResult>,
     pub ssh_history: VecDeque<SshResult>,
+    pub failure_log: VecDeque<FailureLog>,
     pub ping_stats: Option<Statistics>,
     pub ssh_stats: Option<Statistics>,
 }
@@ -49,6 +59,7 @@ impl TargetStats {
             target,
             ping_history: VecDeque::with_capacity(history_size),
             ssh_history: VecDeque::with_capacity(history_size),
+            failure_log: VecDeque::with_capacity(history_size),
             ping_stats: None,
             ssh_stats: None,
         }
@@ -58,6 +69,14 @@ impl TargetStats {
         if self.ping_history.len() >= max_history {
             self.ping_history.pop_front();
         }
+
+        // Log failure if ping failed
+        if !result.success {
+            if let Some(failure_reason) = &result.failure_reason {
+                self.add_failure_log("Ping".to_string(), failure_reason.clone(), max_history);
+            }
+        }
+
         self.ping_history.push_back(result);
         self.update_ping_stats();
     }
@@ -66,8 +85,30 @@ impl TargetStats {
         if self.ssh_history.len() >= max_history {
             self.ssh_history.pop_front();
         }
+
+        // Log failure if SSH failed
+        if !result.success {
+            if let Some(failure_reason) = &result.failure_reason {
+                self.add_failure_log("ssh".to_string(), failure_reason.clone(), max_history);
+            }
+        }
+
         self.ssh_history.push_back(result);
         self.update_ssh_stats();
+    }
+
+    pub fn add_failure_log(&mut self, failure_type: String, reason: String, max_history: usize) {
+        if self.failure_log.len() >= max_history {
+            self.failure_log.pop_front();
+        }
+
+        let failure_entry = FailureLog {
+            timestamp: Utc::now(),
+            failure_type,
+            reason,
+        };
+
+        self.failure_log.push_back(failure_entry);
     }
 
     fn update_ping_stats(&mut self) {
@@ -205,11 +246,12 @@ async fn ping_target(ip: &str) -> PingResult {
 
     let addr = match ip.parse::<std::net::IpAddr>() {
         Ok(addr) => addr,
-        Err(_) => {
+        Err(e) => {
             return PingResult {
                 timestamp,
                 latency_ms: None,
                 success: false,
+                failure_reason: Some(format!("Invalid IP address: {}", e)),
             };
         }
     };
@@ -217,11 +259,12 @@ async fn ping_target(ip: &str) -> PingResult {
     let config = surge_ping::Config::default();
     let client = match surge_ping::Client::new(&config) {
         Ok(client) => client,
-        Err(_) => {
+        Err(e) => {
             return PingResult {
                 timestamp,
                 latency_ms: None,
                 success: false,
+                failure_reason: Some(format!("Failed to create ping client: {}", e)),
             };
         }
     };
@@ -236,12 +279,14 @@ async fn ping_target(ip: &str) -> PingResult {
                 timestamp,
                 latency_ms: Some(latency),
                 success: true,
+                failure_reason: None,
             }
         }
-        Err(_) => PingResult {
+        Err(e) => PingResult {
             timestamp,
             latency_ms: None,
             success: false,
+            failure_reason: Some(format!("Ping failed: {}", e)),
         },
     }
 }
@@ -257,28 +302,39 @@ async fn ssh_test(ip: &str, port: u16, _user: &str, timeout: Duration) -> SshRes
                 let mut session = ssh2::Session::new().unwrap();
                 session.set_tcp_stream(stream);
                 match session.handshake() {
-                    Ok(_) => true,
-                    Err(_) => false,
+                    Ok(_) => Ok("Success".to_string()),
+                    Err(e) => Err(format!("SSH handshake failed: {}", e)),
                 }
             }
-            Err(_) => false,
+            Err(e) => Err(format!("TCP connection failed: {}", e)),
         }
     })
     .await;
 
     match result {
-        Ok(true) => {
+        Ok(Ok(_)) => {
             let connection_time = start.elapsed().as_millis() as f64;
             SshResult {
                 timestamp,
                 connection_time_ms: Some(connection_time),
                 success: true,
+                failure_reason: None,
             }
         }
-        _ => SshResult {
+        Ok(Err(error_msg)) => SshResult {
             timestamp,
             connection_time_ms: None,
             success: false,
+            failure_reason: Some(error_msg),
+        },
+        Err(_) => SshResult {
+            timestamp,
+            connection_time_ms: None,
+            success: false,
+            failure_reason: Some(format!(
+                "SSH connection timeout after {}ms",
+                timeout.as_millis()
+            )),
         },
     }
 }
