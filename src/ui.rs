@@ -634,7 +634,7 @@ fn render_box_plot(f: &mut Frame, area: Rect, target: &TargetStats) {
                 .data(&outlier_data),
         ];
 
-        let x_labels = vec!["Min", "P25", "P50", "P75", "P90", "Max", "P95", "P99"];
+        let x_labels = ["Min", "P25", "P50", "P75", "P90", "Max", "P95", "P99"];
         let y_max = stats.max.max(stats.p99) * 1.1;
         let y_min = stats.min * 0.9;
 
@@ -653,7 +653,7 @@ fn render_box_plot(f: &mut Frame, area: Rect, target: &TargetStats) {
                     .title("Quartiles & Percentiles")
                     .style(Style::default().fg(Color::Gray))
                     .bounds([0.0, 7.0])
-                    .labels(x_labels.iter().map(|s| *s).collect::<Vec<_>>()),
+                    .labels(x_labels.to_vec()),
             )
             .y_axis(
                 Axis::default()

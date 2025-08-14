@@ -144,7 +144,7 @@ impl TargetStats {
 
 pub struct Monitor {
     targets: Vec<TargetStats>,
-    ping_interval: Duration,
+    _ping_interval: Duration,
     ssh_timeout: Duration,
     history_size: usize,
 }
@@ -163,7 +163,7 @@ impl Monitor {
 
         Self {
             targets: target_stats,
-            ping_interval: Duration::from_millis(ping_interval_ms),
+            _ping_interval: Duration::from_millis(ping_interval_ms),
             ssh_timeout: Duration::from_millis(ssh_timeout_ms),
             history_size,
         }
@@ -219,26 +219,6 @@ impl Monitor {
 
         Ok(())
     }
-
-    pub async fn start_monitoring(&mut self) -> Result<()> {
-        let mut ping_interval = tokio::time::interval(self.ping_interval);
-        let mut ssh_interval = tokio::time::interval(self.ping_interval * 5);
-
-        loop {
-            tokio::select! {
-                _ = ping_interval.tick() => {
-                    if let Err(e) = self.run_ping_cycle().await {
-                        eprintln!("Ping cycle error: {}", e);
-                    }
-                }
-                _ = ssh_interval.tick() => {
-                    if let Err(e) = self.run_ssh_cycle().await {
-                        eprintln!("SSH cycle error: {}", e);
-                    }
-                }
-            }
-        }
-    }
 }
 
 async fn ping_target(ip: &str) -> PingResult {
@@ -270,11 +250,10 @@ async fn ping_target(ip: &str) -> PingResult {
     };
 
     let mut pinger = client.pinger(addr, surge_ping::PingIdentifier(0)).await;
-    let start = Instant::now();
 
     match pinger.ping(surge_ping::PingSequence(0), &[]).await {
-        Ok(_) => {
-            let latency = start.elapsed().as_millis() as f64;
+        Ok((_, duration)) => {
+            let latency = duration.as_millis() as f64;
             PingResult {
                 timestamp,
                 latency_ms: Some(latency),
