@@ -7,16 +7,14 @@ use std::path::PathBuf;
 pub struct Config {
     pub targets: Vec<Target>,
     pub ping_interval_ms: u64,
-    pub ssh_timeout_ms: u64,
     pub history_size: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Target {
-    pub ip: String,
+    #[serde(alias = "ip", alias = "host", alias = "domain")]
+    pub address: String,
     pub name: Option<String>,
-    pub ssh_port: Option<u16>,
-    pub ssh_user: Option<String>,
 }
 
 impl Default for Config {
@@ -24,20 +22,15 @@ impl Default for Config {
         Self {
             targets: vec![
                 Target {
-                    ip: "8.8.8.8".to_string(),
+                    address: "8.8.8.8".to_string(),
                     name: Some("Google DNS".to_string()),
-                    ssh_port: None,
-                    ssh_user: None,
                 },
                 Target {
-                    ip: "1.1.1.1".to_string(),
+                    address: "1.1.1.1".to_string(),
                     name: Some("Cloudflare DNS".to_string()),
-                    ssh_port: None,
-                    ssh_user: None,
                 },
             ],
             ping_interval_ms: 1000,
-            ssh_timeout_ms: 5000,
             history_size: 100,
         }
     }
@@ -95,74 +88,30 @@ pub fn load_targets_from_simple_list() -> Result<Vec<Target>> {
         .filter(|line| !line.trim().is_empty() && !line.trim().starts_with('#'))
         .map(|line| {
             let parts: Vec<&str> = line.split_whitespace().collect();
-            let ip = parts[0].to_string();
+            let address = parts[0].to_string();
             let name = if parts.len() > 1 {
                 Some(parts[1..].join(" "))
             } else {
                 None
             };
 
-            Target {
-                ip,
-                name,
-                ssh_port: None,
-                ssh_user: None,
-            }
+            Target { address, name }
         })
         .collect();
 
     Ok(targets)
 }
 
-pub fn parse_targets_from_args(
-    ip_list: Option<String>,
-    ssh_list: Option<String>,
-) -> Result<Vec<Target>> {
+pub fn parse_targets_from_args(ip_list: Option<String>) -> Result<Vec<Target>> {
     let mut targets = Vec::new();
 
     if let Some(ips) = ip_list {
         for ip in ips.split(',') {
-            let ip = ip.trim().to_string();
-            if !ip.is_empty() {
+            let address = ip.trim().to_string();
+            if !address.is_empty() {
                 targets.push(Target {
-                    ip,
+                    address,
                     name: None,
-                    ssh_port: None,
-                    ssh_user: None,
-                });
-            }
-        }
-    }
-
-    if let Some(ssh_targets) = ssh_list {
-        for ssh_target in ssh_targets.split(',') {
-            let ssh_target = ssh_target.trim();
-            if !ssh_target.is_empty() {
-                let (user, ip_port) = if let Some(pos) = ssh_target.find('@') {
-                    (&ssh_target[..pos], &ssh_target[pos + 1..])
-                } else {
-                    return Err(color_eyre::eyre::eyre!(
-                        "Invalid SSH format: {}. Expected USER@ip[:port]",
-                        ssh_target
-                    ));
-                };
-
-                let (ip, port) = if let Some(pos) = ip_port.find(':') {
-                    let ip = &ip_port[..pos];
-                    let port_str = &ip_port[pos + 1..];
-                    let port = port_str.parse::<u16>().map_err(|_| {
-                        color_eyre::eyre::eyre!("Invalid port number: {}", port_str)
-                    })?;
-                    (ip.to_string(), Some(port))
-                } else {
-                    (ip_port.to_string(), Some(22))
-                };
-
-                targets.push(Target {
-                    ip,
-                    name: Some(format!("{}@{}", user, ssh_target)),
-                    ssh_port: port,
-                    ssh_user: Some(user.to_string()),
                 });
             }
         }

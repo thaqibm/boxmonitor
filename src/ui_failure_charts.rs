@@ -30,10 +30,16 @@ pub fn render_all_targets_failure_chart(f: &mut Frame, area: Rect, targets: &[Ta
     for target in targets {
         for failure in &target.failure_log {
             *failure_counts.entry(failure.reason.clone()).or_insert(0) += 1;
-            let target_name = target.target.name.as_ref().unwrap_or(&target.target.ip);
+            let target_name = target
+                .target
+                .name
+                .as_ref()
+                .unwrap_or(&target.target.address);
+            let target_addr = target.target.address.clone();
             all_failures.push((
                 failure.timestamp,
                 target_name.clone(),
+                target_addr,
                 failure.failure_type.clone(),
                 failure.reason.clone(),
             ));
@@ -108,7 +114,13 @@ fn render_failure_bar_chart(f: &mut Frame, area: Rect, failure_counts: &HashMap<
 fn render_failure_log(
     f: &mut Frame,
     area: Rect,
-    failures: &[(chrono::DateTime<chrono::Utc>, String, String, String)],
+    failures: &[(
+        chrono::DateTime<chrono::Utc>,
+        String,
+        String,
+        String,
+        String,
+    )],
 ) {
     // Sort failures by timestamp (most recent first)
     let mut sorted_failures = failures.to_vec();
@@ -117,9 +129,12 @@ fn render_failure_log(
 
     let items: Vec<ListItem> = sorted_failures
         .iter()
-        .map(|(timestamp, target, failure_type, reason)| {
+        .map(|(timestamp, target, target_addr, failure_type, reason)| {
             let time_str = timestamp.format("%H:%M:%S").to_string();
-            let content = format!("{} [{}] {}: {}", time_str, target, failure_type, reason);
+            let content = format!(
+                "{} [{} @ {}] {}: {}",
+                time_str, target, target_addr, failure_type, reason
+            );
             ListItem::new(content)
         })
         .collect();
@@ -157,10 +172,16 @@ pub fn render_single_target_failure_chart(f: &mut Frame, area: Rect, target: &Ta
 
     for failure in &target.failure_log {
         *failure_counts.entry(failure.reason.clone()).or_insert(0) += 1;
-        let target_name = target.target.name.as_ref().unwrap_or(&target.target.ip);
+        let target_name = target
+            .target
+            .name
+            .as_ref()
+            .unwrap_or(&target.target.address);
+        let target_addr = target.target.address.clone();
         target_failures.push((
             failure.timestamp,
             target_name.clone(),
+            target_addr.clone(),
             failure.failure_type.clone(),
             failure.reason.clone(),
         ));
@@ -210,7 +231,11 @@ fn render_single_target_bar_chart(
         .map(|(_, count)| *count)
         .max()
         .unwrap_or(1);
-    let target_name = target.target.name.as_ref().unwrap_or(&target.target.ip);
+    let target_name = target
+        .target
+        .name
+        .as_ref()
+        .unwrap_or(&target.target.address);
     let title = format!("Failures for {}", target_name);
 
     let barchart = BarChart::default()

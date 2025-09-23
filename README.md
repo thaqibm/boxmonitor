@@ -1,13 +1,13 @@
 # BoxMonitor
 
-A network monitoring tool with a terminal user interface (TUI) for monitoring server connectivity via ICMP ping and SSH.
+A terminal-based network monitoring tool focused on ICMP connectivity checks, now with built-in DNS resolution so you can point it at IPs or domain names directly.
 
 ## Features
 
-- **ICMP Ping Monitoring**: Monitor network connectivity to targets
-- **SSH Connection Testing**: Test SSH connectivity and authentication
+- **ICMP Ping Monitoring**: Track network connectivity and latency trends
+- **Domain Support**: Monitor hostnames directly with automatic DNS lookups
 - **Terminal UI**: Real-time monitoring with charts and status displays
-- **Multiple Input Formats**: Support for JSON config or simple IP lists
+- **Multiple Input Formats**: Support for JSON config or simple host lists
 - **Command Line Arguments**: Quick monitoring setup via CLI
 
 ## Requirements
@@ -24,31 +24,31 @@ sudo ./boxmonitor
 
 ### Command Line Options
 ```bash
-# Monitor specific IPs
-sudo ./boxmonitor --ip "192.168.1.1,192.168.1.2"
+# Monitor specific hosts (IP addresses or domain names)
+sudo ./boxmonitor --ip "192.168.1.1,example.com"
 
-# Monitor SSH targets
-sudo ./boxmonitor --ssh "user@192.168.1.1:22,admin@192.168.1.2"
-
-# Use simple IP list format
+# Use simple host list format
 sudo ./boxmonitor --simple
 
 # Show current configuration
 sudo ./boxmonitor --config
+
+# Debug ping behaviour and view raw failures
+sudo ./boxmonitor --debug --ip "example.com"
 ```
 
 ## Configuration
 
 ### Simple List Format
-Create `~/.config/box/.iplist` with one IP per line:
+Create `~/.config/box/.iplist` with one host per line:
 ```
 192.168.1.1
-192.168.1.2
-10.0.0.1
+example.com
+api.internal.local
 ```
 
 ### JSON Configuration
-For advanced configuration with SSH targets and custom settings.
+For advanced configuration with custom names, ping intervals, and history sizing.
 
 ## Building
 
@@ -61,5 +61,4 @@ cargo build --release
 - ratatui - Terminal UI framework
 - tokio - Async runtime
 - surge-ping - ICMP ping implementation
-- ssh2 - SSH client functionality
 - crossterm - Terminal handling

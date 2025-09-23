@@ -3,7 +3,8 @@ use chrono::{DateTime, Utc};
 use color_eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
-use std::time::{Duration, Instant};
+use std::hash::{Hash, Hasher};
+use std::net::IpAddr;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PingResult {
@@ -11,20 +12,13 @@ pub struct PingResult {
     pub latency_ms: Option<f64>,
     pub success: bool,
     pub failure_reason: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SshResult {
-    pub timestamp: DateTime<Utc>,
-    pub connection_time_ms: Option<f64>,
-    pub success: bool,
-    pub failure_reason: Option<String>,
+    pub resolved_ip: Option<IpAddr>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FailureLog {
     pub timestamp: DateTime<Utc>,
-    pub failure_type: String, // "ping" or "ssh"
+    pub failure_type: String,
     pub reason: String,
 }
 
@@ -32,10 +26,8 @@ pub struct FailureLog {
 pub struct TargetStats {
     pub target: Target,
     pub ping_history: VecDeque<PingResult>,
-    pub ssh_history: VecDeque<SshResult>,
     pub failure_log: VecDeque<FailureLog>,
     pub ping_stats: Option<Statistics>,
-    pub ssh_stats: Option<Statistics>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -58,10 +50,8 @@ impl TargetStats {
         Self {
             target,
             ping_history: VecDeque::with_capacity(history_size),
-            ssh_history: VecDeque::with_capacity(history_size),
             failure_log: VecDeque::with_capacity(history_size),
             ping_stats: None,
-            ssh_stats: None,
         }
     }
 
@@ -79,22 +69,6 @@ impl TargetStats {
 
         self.ping_history.push_back(result);
         self.update_ping_stats();
-    }
-
-    pub fn add_ssh_result(&mut self, result: SshResult, max_history: usize) {
-        if self.ssh_history.len() >= max_history {
-            self.ssh_history.pop_front();
-        }
-
-        // Log failure if SSH failed
-        if !result.success {
-            if let Some(failure_reason) = &result.failure_reason {
-                self.add_failure_log("ssh".to_string(), failure_reason.clone(), max_history);
-            }
-        }
-
-        self.ssh_history.push_back(result);
-        self.update_ssh_stats();
     }
 
     pub fn add_failure_log(&mut self, failure_type: String, reason: String, max_history: usize) {
@@ -125,36 +99,20 @@ impl TargetStats {
             ));
         }
     }
-
-    fn update_ssh_stats(&mut self) {
-        let successful_ssh: Vec<f64> = self
-            .ssh_history
-            .iter()
-            .filter_map(|r| r.connection_time_ms)
-            .collect();
-
-        if !successful_ssh.is_empty() {
-            self.ssh_stats = Some(calculate_statistics(
-                &successful_ssh,
-                self.ssh_history.len(),
-            ));
-        }
-    }
 }
 
 pub struct Monitor {
     targets: Vec<TargetStats>,
-    _ping_interval: Duration,
-    ssh_timeout: Duration,
     history_size: usize,
+    debug_logging: bool,
 }
 
 impl Monitor {
     pub fn new(
         targets: Vec<Target>,
-        ping_interval_ms: u64,
-        ssh_timeout_ms: u64,
+        _ping_interval_ms: u64,
         history_size: usize,
+        debug_logging: bool,
     ) -> Self {
         let target_stats = targets
             .into_iter()
@@ -163,9 +121,8 @@ impl Monitor {
 
         Self {
             targets: target_stats,
-            _ping_interval: Duration::from_millis(ping_interval_ms),
-            ssh_timeout: Duration::from_millis(ssh_timeout_ms),
             history_size,
+            debug_logging,
         }
     }
 
@@ -177,42 +134,18 @@ impl Monitor {
         let mut handles = Vec::new();
 
         for (index, target_stats) in self.targets.iter().enumerate() {
-            let ip = target_stats.target.ip.clone();
-            let handle = tokio::spawn(async move { (index, ping_target(&ip).await) });
+            let address = target_stats.target.address.clone();
+            let handle = tokio::spawn(async move { (index, ping_target(&address).await) });
             handles.push(handle);
         }
 
         for handle in handles {
             if let Ok((index, result)) = handle.await {
                 if let Some(target_stats) = self.targets.get_mut(index) {
+                    if self.debug_logging {
+                        log_ping_result(&target_stats.target.address, &result);
+                    }
                     target_stats.add_ping_result(result, self.history_size);
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    pub async fn run_ssh_cycle(&mut self) -> Result<()> {
-        let mut handles = Vec::new();
-
-        for (index, target_stats) in self.targets.iter().enumerate() {
-            if target_stats.target.ssh_port.is_some() && target_stats.target.ssh_user.is_some() {
-                let ip = target_stats.target.ip.clone();
-                let port = target_stats.target.ssh_port.unwrap_or(22);
-                let user = target_stats.target.ssh_user.clone().unwrap();
-                let timeout = self.ssh_timeout;
-
-                let handle =
-                    tokio::spawn(async move { (index, ssh_test(&ip, port, &user, timeout).await) });
-                handles.push(handle);
-            }
-        }
-
-        for handle in handles {
-            if let Ok((index, result)) = handle.await {
-                if let Some(target_stats) = self.targets.get_mut(index) {
-                    target_stats.add_ssh_result(result, self.history_size);
                 }
             }
         }
@@ -221,17 +154,18 @@ impl Monitor {
     }
 }
 
-async fn ping_target(ip: &str) -> PingResult {
+async fn ping_target(host: &str) -> PingResult {
     let timestamp = Utc::now();
 
-    let addr = match ip.parse::<std::net::IpAddr>() {
+    let addr = match resolve_host_to_ip(host).await {
         Ok(addr) => addr,
         Err(e) => {
             return PingResult {
                 timestamp,
                 latency_ms: None,
                 success: false,
-                failure_reason: Some(format!("Invalid IP address: {}", e)),
+                failure_reason: Some(e),
+                resolved_ip: None,
             };
         }
     };
@@ -245,11 +179,13 @@ async fn ping_target(ip: &str) -> PingResult {
                 latency_ms: None,
                 success: false,
                 failure_reason: Some(format!("Failed to create ping client: {}", e)),
+                resolved_ip: Some(addr),
             };
         }
     };
 
-    let mut pinger = client.pinger(addr, surge_ping::PingIdentifier(0)).await;
+    let identifier = surge_ping::PingIdentifier(unique_identifier(host));
+    let mut pinger = client.pinger(addr, identifier).await;
 
     match pinger.ping(surge_ping::PingSequence(0), &[]).await {
         Ok((_, duration)) => {
@@ -259,63 +195,42 @@ async fn ping_target(ip: &str) -> PingResult {
                 latency_ms: Some(latency),
                 success: true,
                 failure_reason: None,
+                resolved_ip: Some(addr),
             }
         }
         Err(e) => PingResult {
             timestamp,
             latency_ms: None,
             success: false,
-            failure_reason: Some(format!("Ping failed: {}", e)),
+            failure_reason: Some(format!("Ping failed: {:#?}", e)),
+            resolved_ip: Some(addr),
         },
     }
 }
 
-async fn ssh_test(ip: &str, port: u16, _user: &str, timeout: Duration) -> SshResult {
-    let start = Instant::now();
-    let timestamp = Utc::now();
-
-    let result = tokio::time::timeout(timeout, async {
-        let tcp = std::net::TcpStream::connect(format!("{}:{}", ip, port));
-        match tcp {
-            Ok(stream) => {
-                let mut session = ssh2::Session::new().unwrap();
-                session.set_tcp_stream(stream);
-                match session.handshake() {
-                    Ok(_) => Ok("Success".to_string()),
-                    Err(e) => Err(format!("SSH handshake failed: {}", e)),
-                }
-            }
-            Err(e) => Err(format!("TCP connection failed: {}", e)),
-        }
-    })
-    .await;
-
-    match result {
-        Ok(Ok(_)) => {
-            let connection_time = start.elapsed().as_millis() as f64;
-            SshResult {
-                timestamp,
-                connection_time_ms: Some(connection_time),
-                success: true,
-                failure_reason: None,
-            }
-        }
-        Ok(Err(error_msg)) => SshResult {
-            timestamp,
-            connection_time_ms: None,
-            success: false,
-            failure_reason: Some(error_msg),
-        },
-        Err(_) => SshResult {
-            timestamp,
-            connection_time_ms: None,
-            success: false,
-            failure_reason: Some(format!(
-                "SSH connection timeout after {}ms",
-                timeout.as_millis()
-            )),
-        },
+async fn resolve_host_to_ip(host: &str) -> Result<IpAddr, String> {
+    if let Ok(addr) = host.parse::<IpAddr>() {
+        return Ok(addr);
     }
+
+    let lookup = tokio::net::lookup_host((host, 0))
+        .await
+        .map_err(|e| format!("DNS lookup failed for {}: {}", host, e))?;
+
+    let mut first_addr: Option<IpAddr> = None;
+
+    for socket_addr in lookup {
+        let ip = socket_addr.ip();
+        if ip.is_ipv4() {
+            return Ok(ip);
+        }
+
+        if first_addr.is_none() {
+            first_addr = Some(ip);
+        }
+    }
+
+    first_addr.ok_or_else(|| format!("DNS lookup returned no addresses for {}", host))
 }
 
 fn calculate_statistics(values: &[f64], total_count: usize) -> Statistics {
@@ -362,4 +277,40 @@ fn percentile(sorted_values: &[f64], p: f64) -> f64 {
         let weight = index - lower as f64;
         sorted_values[lower] * (1.0 - weight) + sorted_values[upper] * weight
     }
+}
+
+fn log_ping_result(target: &str, result: &PingResult) {
+    let resolved = result
+        .resolved_ip
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|| "unresolved".to_string());
+
+    if result.success {
+        if let Some(latency) = result.latency_ms {
+            eprintln!(
+                "[debug] Ping success: target={} ip={} latency={:.2}ms timestamp={}",
+                target, resolved, latency, result.timestamp
+            );
+        } else {
+            eprintln!(
+                "[debug] Ping reported success without latency: target={} ip={} timestamp={}",
+                target, resolved, result.timestamp
+            );
+        }
+    } else {
+        let reason = result
+            .failure_reason
+            .as_deref()
+            .unwrap_or("Unknown failure");
+        eprintln!(
+            "[debug] Ping failure: target={} ip={} reason={} timestamp={}",
+            target, resolved, reason, result.timestamp
+        );
+    }
+}
+
+fn unique_identifier(host: &str) -> u16 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    host.hash(&mut hasher);
+    (hasher.finish() & 0xFFFF) as u16
 }

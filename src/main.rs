@@ -14,20 +14,21 @@ use tokio::sync::Mutex;
 #[command(name = "boxmonitor")]
 #[command(about = "A network monitoring tool with TUI interface")]
 struct Args {
-    #[arg(short, long, help = "Use simple IP list format instead of JSON config")]
+    #[arg(
+        short,
+        long,
+        help = "Use simple host list format instead of JSON config"
+    )]
     simple: bool,
 
     #[arg(short, long, help = "Show configuration and exit")]
     config: bool,
 
-    #[arg(long, help = "Comma-separated list of IP addresses to monitor")]
+    #[arg(long, help = "Comma-separated list of hosts (IP or domain) to monitor")]
     ip: Option<String>,
 
-    #[arg(
-        long,
-        help = "Comma-separated list of SSH targets in USER@ip[:port] format"
-    )]
-    ssh: Option<String>,
+    #[arg(long, help = "Print ping diagnostics to stderr for debugging")]
+    debug: bool,
 }
 
 #[tokio::main]
@@ -37,7 +38,10 @@ async fn main() -> Result<()> {
     // Check if running as root (required for ICMP ping)
     if !is_root() {
         eprintln!("Error: This program requires root privileges to send ICMP ping packets.");
-        eprintln!("Please run with sudo: sudo ./boxmonitor");
+        eprintln!(
+            "Please run with sudo: sudo {}",
+            std::env::args().next().unwrap()
+        );
         std::process::exit(1);
     }
 
@@ -48,8 +52,8 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    let config = if args.ip.is_some() || args.ssh.is_some() {
-        let targets = parse_targets_from_args(args.ip, args.ssh)?;
+    let config = if args.ip.is_some() {
+        let targets = parse_targets_from_args(args.ip)?;
         config::Config {
             targets,
             ..Default::default()
@@ -65,15 +69,15 @@ async fn main() -> Result<()> {
     };
 
     if config.targets.is_empty() {
-        eprintln!("No targets configured. Please add IPs to ~/.config/box/.iplist");
+        eprintln!("No targets configured. Please add hosts to ~/.config/box/.iplist");
         return Ok(());
     }
 
     let mut monitor = Monitor::new(
         config.targets.clone(),
         config.ping_interval_ms,
-        config.ssh_timeout_ms,
         config.history_size,
+        args.debug,
     );
 
     let targets = Arc::new(Mutex::new(monitor.get_targets().to_vec()));
@@ -82,29 +86,16 @@ async fn main() -> Result<()> {
     let monitoring_task = tokio::spawn(async move {
         let mut interval =
             tokio::time::interval(std::time::Duration::from_millis(config.ping_interval_ms));
-        let mut ssh_interval = tokio::time::interval(std::time::Duration::from_millis(
-            config.ping_interval_ms * 5,
-        ));
 
         loop {
-            tokio::select! {
-                _ = interval.tick() => {
-                    if let Err(e) = monitor.run_ping_cycle().await {
-                        eprintln!("Ping cycle error: {}", e);
-                    }
+            interval.tick().await;
 
-                    let mut targets_guard = targets_clone.lock().await;
-                    *targets_guard = monitor.get_targets().to_vec();
-                }
-                _ = ssh_interval.tick() => {
-                    if let Err(e) = monitor.run_ssh_cycle().await {
-                        eprintln!("SSH cycle error: {}", e);
-                    }
-
-                    let mut targets_guard = targets_clone.lock().await;
-                    *targets_guard = monitor.get_targets().to_vec();
-                }
+            if let Err(e) = monitor.run_ping_cycle().await {
+                eprintln!("Ping cycle error: {}", e);
             }
+
+            let mut targets_guard = targets_clone.lock().await;
+            *targets_guard = monitor.get_targets().to_vec();
         }
     });
 

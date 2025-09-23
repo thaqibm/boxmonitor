@@ -25,7 +25,6 @@ use tokio::sync::Mutex;
 pub enum PlotView {
     AllTargets,
     PingOnly,
-    SshOnly,
     FailureChart,
 }
 
@@ -78,17 +77,10 @@ impl App {
         }
     }
 
-    pub fn next_plot_view(&mut self, has_ssh: bool) {
+    pub fn next_plot_view(&mut self) {
         self.current_plot_view = match self.current_plot_view {
             PlotView::AllTargets => PlotView::PingOnly,
-            PlotView::PingOnly => {
-                if has_ssh {
-                    PlotView::SshOnly
-                } else {
-                    PlotView::FailureChart
-                }
-            }
-            PlotView::SshOnly => PlotView::FailureChart,
+            PlotView::PingOnly => PlotView::FailureChart,
             PlotView::FailureChart => PlotView::AllTargets,
         };
     }
@@ -147,22 +139,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Resul
                             app.previous_tab(target_count);
                         }
                         KeyCode::Char('p') => {
-                            let has_ssh = {
-                                let targets = app.targets.lock().await;
-                                match app.tab_mode {
-                                    TabMode::AllTargets => {
-                                        targets.iter().any(|t| t.target.ssh_port.is_some())
-                                    }
-                                    TabMode::Individual(idx) => {
-                                        if let Some(target) = targets.get(idx) {
-                                            target.target.ssh_port.is_some()
-                                        } else {
-                                            false
-                                        }
-                                    }
-                                }
-                            };
-                            app.next_plot_view(has_ssh);
+                            app.next_plot_view();
                         }
                         _ => {}
                     }
@@ -191,7 +168,11 @@ fn ui(f: &mut Frame, app: &App, targets: &[TargetStats]) {
 
     let mut tab_titles: Vec<Line> = vec![Line::from(vec![Span::raw("All Targets")])];
     tab_titles.extend(targets.iter().map(|target| {
-        let name = target.target.name.as_ref().unwrap_or(&target.target.ip);
+        let name = target
+            .target
+            .name
+            .as_ref()
+            .unwrap_or(&target.target.address);
         Line::from(vec![Span::raw(name)])
     }));
 
@@ -252,13 +233,17 @@ fn render_target_details(f: &mut Frame, area: Rect, target: &TargetStats, plot_v
 }
 
 fn render_target_info(f: &mut Frame, area: Rect, target: &TargetStats) {
-    let target_name = target.target.name.as_ref().unwrap_or(&target.target.ip);
+    let target_name = target
+        .target
+        .name
+        .as_ref()
+        .unwrap_or(&target.target.address);
 
     let info_text = vec![Line::from(vec![
         Span::raw("Target: "),
         Span::styled(target_name, Style::default().fg(Color::Cyan)),
         Span::raw(" ("),
-        Span::raw(&target.target.ip),
+        Span::raw(&target.target.address),
         Span::raw(")"),
     ])];
 
@@ -268,36 +253,12 @@ fn render_target_info(f: &mut Frame, area: Rect, target: &TargetStats) {
 }
 
 fn render_statistics(f: &mut Frame, area: Rect, target: &TargetStats) {
-    let has_ssh = target.target.ssh_port.is_some();
-
-    let chunks = if has_ssh {
-        Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
-            .split(area)
-    } else {
-        Layout::default()
-            .direction(Direction::Horizontal)
-            .constraints([Constraint::Percentage(100)])
-            .split(area)
-    };
-
     if let Some(ping_stats) = &target.ping_stats {
-        render_ping_stats(f, chunks[0], ping_stats);
+        render_ping_stats(f, area, ping_stats);
     } else {
         let block = Block::default().title("Ping Stats").borders(Borders::ALL);
         let paragraph = Paragraph::new("No ping data available").block(block);
-        f.render_widget(paragraph, chunks[0]);
-    }
-
-    if has_ssh {
-        if let Some(ssh_stats) = &target.ssh_stats {
-            render_ssh_stats(f, chunks[1], ssh_stats);
-        } else {
-            let block = Block::default().title("SSH Stats").borders(Borders::ALL);
-            let paragraph = Paragraph::new("No SSH data available").block(block);
-            f.render_widget(paragraph, chunks[1]);
-        }
+        f.render_widget(paragraph, area);
     }
 }
 
@@ -312,22 +273,6 @@ fn render_ping_stats(f: &mut Frame, area: Rect, stats: &Statistics) {
 
     let list = List::new(items)
         .block(Block::default().title("Ping Stats").borders(Borders::ALL))
-        .style(Style::default().fg(Color::White));
-
-    f.render_widget(list, area);
-}
-
-fn render_ssh_stats(f: &mut Frame, area: Rect, stats: &Statistics) {
-    let items = vec![
-        ListItem::new(format!("Mean: {:.2}ms", stats.mean)),
-        ListItem::new(format!("Median: {:.2}ms", stats.median)),
-        ListItem::new(format!("Min/Max: {:.2}/{:.2}ms", stats.min, stats.max)),
-        ListItem::new(format!("P95: {:.2}ms", stats.p95)),
-        ListItem::new(format!("Success: {:.2}%", stats.success_rate)),
-    ];
-
-    let list = List::new(items)
-        .block(Block::default().title("SSH Stats").borders(Borders::ALL))
         .style(Style::default().fg(Color::White));
 
     f.render_widget(list, area);
@@ -364,9 +309,6 @@ fn render_all_targets_charts(
         PlotView::PingOnly => {
             render_all_targets_ping_chart(f, area, targets);
         }
-        PlotView::SshOnly => {
-            render_all_targets_ssh_chart(f, area, targets);
-        }
         PlotView::FailureChart => {
             render_all_targets_failure_chart(f, area, targets);
         }
@@ -379,8 +321,6 @@ fn render_single_target_charts(
     target: &TargetStats,
     plot_view: PlotView,
 ) {
-    let has_ssh = target.target.ssh_port.is_some();
-
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
@@ -393,15 +333,6 @@ fn render_single_target_charts(
         PlotView::PingOnly => {
             render_ping_chart(f, chunks[0], target);
         }
-        PlotView::SshOnly => {
-            if has_ssh {
-                render_ssh_chart(f, chunks[0], target);
-            } else {
-                let block = Block::default().title("SSH Chart").borders(Borders::ALL);
-                let paragraph = Paragraph::new("SSH monitoring not configured").block(block);
-                f.render_widget(paragraph, chunks[0]);
-            }
-        }
         PlotView::FailureChart => {
             render_single_target_failure_chart(f, chunks[0], target);
         }
@@ -411,126 +342,7 @@ fn render_single_target_charts(
 }
 
 fn render_overlay_chart(f: &mut Frame, area: Rect, target: &TargetStats) {
-    let has_ssh = target.target.ssh_port.is_some();
-
-    if target.ping_history.is_empty() && (!has_ssh || target.ssh_history.is_empty()) {
-        let block = Block::default()
-            .title("Latency Overlay")
-            .borders(Borders::ALL);
-        let paragraph = Paragraph::new("No data available").block(block);
-        f.render_widget(paragraph, area);
-        return;
-    }
-
-    let mut datasets = Vec::new();
-    let mut max_latency: f64 = 0.0;
-    let mut min_latency = f64::INFINITY;
-    let mut max_length = 0;
-
-    let ssh_data: Vec<(f64, f64)>;
-    let ping_data: Vec<(f64, f64)>;
-    // Ping data
-    if !target.ping_history.is_empty() {
-        ping_data = target
-            .ping_history
-            .iter()
-            .enumerate()
-            .filter_map(|(i, result)| result.latency_ms.map(|latency| (i as f64, latency)))
-            .collect();
-
-        if !ping_data.is_empty() {
-            max_latency = max_latency.max(ping_data.iter().map(|(_, y)| *y).fold(0.0, f64::max));
-            min_latency = min_latency.min(
-                ping_data
-                    .iter()
-                    .map(|(_, y)| *y)
-                    .fold(f64::INFINITY, f64::min),
-            );
-            max_length = max_length.max(target.ping_history.len());
-
-            datasets.push(
-                Dataset::default()
-                    .name("Ping")
-                    .marker(symbols::Marker::Braille)
-                    .style(Style::default().fg(Color::Green))
-                    .graph_type(GraphType::Line)
-                    .data(&ping_data),
-            );
-        }
-    }
-    // SSH data
-    if has_ssh && !target.ssh_history.is_empty() {
-        ssh_data = target
-            .ssh_history
-            .iter()
-            .enumerate()
-            .filter_map(|(i, result)| result.connection_time_ms.map(|time| (i as f64, time)))
-            .collect();
-
-        if !ssh_data.is_empty() {
-            max_latency = max_latency.max(ssh_data.iter().map(|(_, y)| *y).fold(0.0, f64::max));
-            min_latency = min_latency.min(
-                ssh_data
-                    .iter()
-                    .map(|(_, y)| *y)
-                    .fold(f64::INFINITY, f64::min),
-            );
-            max_length = max_length.max(target.ssh_history.len());
-
-            datasets.push(
-                Dataset::default()
-                    .name("SSH")
-                    .marker(symbols::Marker::Braille)
-                    .style(Style::default().fg(Color::Blue))
-                    .graph_type(GraphType::Line)
-                    .data(&ssh_data),
-            );
-        }
-    }
-
-    if datasets.is_empty() {
-        let block = Block::default()
-            .title("Latency Overlay")
-            .borders(Borders::ALL);
-        let paragraph = Paragraph::new("All connections failed").block(block);
-        f.render_widget(paragraph, area);
-        return;
-    }
-
-    let y_max = max_latency * 1.1;
-    let y_min = min_latency.min(0.0);
-    let x_max = max_length as f64;
-
-    let y_labels: Vec<String> = (0..=5)
-        .map(|i| format!("{:.1}", y_min + (y_max - y_min) * i as f64 / 5.0))
-        .collect();
-
-    let x_labels: Vec<String> = (0..=5)
-        .map(|i| format!("{:.0}", x_max * i as f64 / 5.0))
-        .collect();
-
-    let chart = Chart::new(datasets)
-        .block(
-            Block::default()
-                .title("Latency Overlay (ms) - Press 'p' to cycle views")
-                .borders(Borders::ALL),
-        )
-        .x_axis(
-            Axis::default()
-                .title("Time (samples)")
-                .style(Style::default().fg(Color::Gray))
-                .bounds([0.0, x_max])
-                .labels(x_labels.iter().map(|s| s.as_str()).collect::<Vec<_>>()),
-        )
-        .y_axis(
-            Axis::default()
-                .title("Latency (ms)")
-                .style(Style::default().fg(Color::Gray))
-                .bounds([y_min, y_max])
-                .labels(y_labels.iter().map(|s| s.as_str()).collect::<Vec<_>>()),
-        );
-
-    f.render_widget(chart, area);
+    render_ping_chart(f, area, target);
 }
 
 fn render_ping_chart(f: &mut Frame, area: Rect, target: &TargetStats) {
@@ -565,7 +377,7 @@ fn render_ping_chart(f: &mut Frame, area: Rect, target: &TargetStats) {
         Dataset::default()
             .name("Ping")
             .marker(symbols::Marker::Braille)
-            .style(Style::default().fg(Color::Green))
+            .style(Style::default().fg(Color::White))
             .graph_type(GraphType::Line)
             .data(&ping_data),
     ];
@@ -691,7 +503,6 @@ fn render_all_targets_overlay_chart(f: &mut Frame, area: Rect, targets: &[Target
     let mut min_latency = f64::INFINITY;
     let mut max_length = 0;
 
-    // Define colors for different targets
     let colors = [
         Color::Green,
         Color::Blue,
@@ -699,7 +510,7 @@ fn render_all_targets_overlay_chart(f: &mut Frame, area: Rect, targets: &[Target
         Color::Magenta,
         Color::Cyan,
         Color::Red,
-        Color::LightGreen,
+        Color::White,
         Color::LightBlue,
         Color::LightYellow,
         Color::LightMagenta,
@@ -708,72 +519,41 @@ fn render_all_targets_overlay_chart(f: &mut Frame, area: Rect, targets: &[Target
     ];
 
     for (target_idx, target) in targets.iter().enumerate() {
-        let target_name = target.target.name.as_ref().unwrap_or(&target.target.ip);
+        if target.ping_history.is_empty() {
+            continue;
+        }
+
+        let target_name = target
+            .target
+            .name
+            .as_ref()
+            .unwrap_or(&target.target.address);
         let color = colors[target_idx % colors.len()];
 
-        // Ping data for this target
-        if !target.ping_history.is_empty() {
-            let ping_data: Vec<(f64, f64)> = target
-                .ping_history
-                .iter()
-                .enumerate()
-                .filter_map(|(i, result)| result.latency_ms.map(|latency| (i as f64, latency)))
-                .collect();
+        let ping_data: Vec<(f64, f64)> = target
+            .ping_history
+            .iter()
+            .enumerate()
+            .filter_map(|(i, result)| result.latency_ms.map(|latency| (i as f64, latency)))
+            .collect();
 
-            if !ping_data.is_empty() {
-                max_latency =
-                    max_latency.max(ping_data.iter().map(|(_, y)| *y).fold(0.0, f64::max));
-                min_latency = min_latency.min(
-                    ping_data
-                        .iter()
-                        .map(|(_, y)| *y)
-                        .fold(f64::INFINITY, f64::min),
-                );
-                max_length = max_length.max(target.ping_history.len());
-
-                all_data.push(ping_data);
-                all_names.push(format!("{} (Ping)", target_name));
-                all_colors.push(color);
-                all_markers.push(symbols::Marker::Braille);
-            }
+        if ping_data.is_empty() {
+            continue;
         }
 
-        // SSH data for this target
-        if target.target.ssh_port.is_some() && !target.ssh_history.is_empty() {
-            let ssh_data: Vec<(f64, f64)> = target
-                .ssh_history
+        max_latency = max_latency.max(ping_data.iter().map(|(_, y)| *y).fold(0.0, f64::max));
+        min_latency = min_latency.min(
+            ping_data
                 .iter()
-                .enumerate()
-                .filter_map(|(i, result)| result.connection_time_ms.map(|time| (i as f64, time)))
-                .collect();
+                .map(|(_, y)| *y)
+                .fold(f64::INFINITY, f64::min),
+        );
+        max_length = max_length.max(target.ping_history.len());
 
-            if !ssh_data.is_empty() {
-                max_latency = max_latency.max(ssh_data.iter().map(|(_, y)| *y).fold(0.0, f64::max));
-                min_latency = min_latency.min(
-                    ssh_data
-                        .iter()
-                        .map(|(_, y)| *y)
-                        .fold(f64::INFINITY, f64::min),
-                );
-                max_length = max_length.max(target.ssh_history.len());
-
-                // Use dashed line style for SSH by alternating color intensity
-                let ssh_color = match color {
-                    Color::Green => Color::LightGreen,
-                    Color::Blue => Color::LightBlue,
-                    Color::Yellow => Color::LightYellow,
-                    Color::Magenta => Color::LightMagenta,
-                    Color::Cyan => Color::LightCyan,
-                    Color::Red => Color::LightRed,
-                    _ => Color::White,
-                };
-
-                all_data.push(ssh_data);
-                all_names.push(format!("{} (SSH)", target_name));
-                all_colors.push(ssh_color);
-                all_markers.push(symbols::Marker::Dot);
-            }
-        }
+        all_data.push(ping_data);
+        all_names.push(target_name.clone());
+        all_colors.push(color);
+        all_markers.push(symbols::Marker::Braille);
     }
 
     if all_data.is_empty() {
@@ -869,7 +649,11 @@ fn render_all_targets_ping_chart(f: &mut Frame, area: Rect, targets: &[TargetSta
     ];
 
     for (target_idx, target) in targets.iter().enumerate() {
-        let target_name = target.target.name.as_ref().unwrap_or(&target.target.ip);
+        let target_name = target
+            .target
+            .name
+            .as_ref()
+            .unwrap_or(&target.target.address);
         let color = colors[target_idx % colors.len()];
 
         if !target.ping_history.is_empty() {
@@ -949,203 +733,6 @@ fn render_all_targets_ping_chart(f: &mut Frame, area: Rect, targets: &[TargetSta
         .y_axis(
             Axis::default()
                 .title("Latency (ms)")
-                .style(Style::default().fg(Color::Gray))
-                .bounds([y_min, y_max])
-                .labels(y_labels.iter().map(|s| s.as_str()).collect::<Vec<_>>()),
-        );
-
-    f.render_widget(chart, area);
-}
-
-fn render_all_targets_ssh_chart(f: &mut Frame, area: Rect, targets: &[TargetStats]) {
-    if targets.is_empty() {
-        let block = Block::default()
-            .title("All Targets SSH")
-            .borders(Borders::ALL);
-        let paragraph = Paragraph::new("No targets available").block(block);
-        f.render_widget(paragraph, area);
-        return;
-    }
-
-    let mut all_data = Vec::new();
-    let mut all_names = Vec::new();
-    let mut all_colors = Vec::new();
-    let mut max_latency: f64 = 0.0;
-    let mut min_latency = f64::INFINITY;
-    let mut max_length = 0;
-
-    let colors = [
-        Color::Green,
-        Color::Blue,
-        Color::Yellow,
-        Color::Magenta,
-        Color::Cyan,
-        Color::Red,
-        Color::LightGreen,
-        Color::LightBlue,
-        Color::LightYellow,
-        Color::LightMagenta,
-        Color::LightCyan,
-        Color::LightRed,
-    ];
-
-    for (target_idx, target) in targets.iter().enumerate() {
-        let target_name = target.target.name.as_ref().unwrap_or(&target.target.ip);
-        let color = colors[target_idx % colors.len()];
-
-        if target.target.ssh_port.is_some() && !target.ssh_history.is_empty() {
-            let ssh_data: Vec<(f64, f64)> = target
-                .ssh_history
-                .iter()
-                .enumerate()
-                .filter_map(|(i, result)| result.connection_time_ms.map(|time| (i as f64, time)))
-                .collect();
-
-            if !ssh_data.is_empty() {
-                max_latency = max_latency.max(ssh_data.iter().map(|(_, y)| *y).fold(0.0, f64::max));
-                min_latency = min_latency.min(
-                    ssh_data
-                        .iter()
-                        .map(|(_, y)| *y)
-                        .fold(f64::INFINITY, f64::min),
-                );
-                max_length = max_length.max(target.ssh_history.len());
-
-                all_data.push(ssh_data);
-                all_names.push(target_name.to_string());
-                all_colors.push(color);
-            }
-        }
-    }
-
-    if all_data.is_empty() {
-        let block = Block::default()
-            .title("All Targets SSH")
-            .borders(Borders::ALL);
-        let paragraph = Paragraph::new("No SSH data available for any target").block(block);
-        f.render_widget(paragraph, area);
-        return;
-    }
-
-    let datasets: Vec<Dataset> = all_data
-        .iter()
-        .zip(all_names.iter())
-        .zip(all_colors.iter())
-        .map(|((data, name), color)| {
-            Dataset::default()
-                .name(name.as_str())
-                .marker(symbols::Marker::Braille)
-                .style(Style::default().fg(*color))
-                .graph_type(GraphType::Line)
-                .data(data)
-        })
-        .collect();
-
-    let y_max = max_latency * 1.1;
-    let y_min = min_latency.min(0.0);
-    let x_max = max_length as f64;
-
-    let y_labels: Vec<String> = (0..=5)
-        .map(|i| format!("{:.1}", y_min + (y_max - y_min) * i as f64 / 5.0))
-        .collect();
-
-    let x_labels: Vec<String> = (0..=5)
-        .map(|i| format!("{:.0}", x_max * i as f64 / 5.0))
-        .collect();
-
-    let chart = Chart::new(datasets)
-        .block(
-            Block::default()
-                .title("All Targets SSH Connection Time (ms) - Press 'p' to cycle views")
-                .borders(Borders::ALL),
-        )
-        .x_axis(
-            Axis::default()
-                .title("Time (samples)")
-                .style(Style::default().fg(Color::Gray))
-                .bounds([0.0, x_max])
-                .labels(x_labels.iter().map(|s| s.as_str()).collect::<Vec<_>>()),
-        )
-        .y_axis(
-            Axis::default()
-                .title("Connection Time (ms)")
-                .style(Style::default().fg(Color::Gray))
-                .bounds([y_min, y_max])
-                .labels(y_labels.iter().map(|s| s.as_str()).collect::<Vec<_>>()),
-        );
-
-    f.render_widget(chart, area);
-}
-
-fn render_ssh_chart(f: &mut Frame, area: Rect, target: &TargetStats) {
-    if target.ssh_history.is_empty() {
-        let block = Block::default()
-            .title("SSH Connection Time")
-            .borders(Borders::ALL);
-        let paragraph = Paragraph::new("No SSH data yet...").block(block);
-        f.render_widget(paragraph, area);
-        return;
-    }
-
-    let ssh_data: Vec<(f64, f64)> = target
-        .ssh_history
-        .iter()
-        .enumerate()
-        .filter_map(|(i, result)| result.connection_time_ms.map(|time| (i as f64, time)))
-        .collect();
-
-    if ssh_data.is_empty() {
-        let block = Block::default()
-            .title("SSH Connection Time")
-            .borders(Borders::ALL);
-        let paragraph = Paragraph::new("All SSH connections failed").block(block);
-        f.render_widget(paragraph, area);
-        return;
-    }
-
-    let max_time = ssh_data.iter().map(|(_, y)| *y).fold(0.0, f64::max);
-    let min_time = ssh_data
-        .iter()
-        .map(|(_, y)| *y)
-        .fold(f64::INFINITY, f64::min);
-
-    let datasets = vec![
-        Dataset::default()
-            .name("SSH")
-            .marker(symbols::Marker::Braille)
-            .style(Style::default().fg(Color::Blue))
-            .graph_type(GraphType::Line)
-            .data(&ssh_data),
-    ];
-
-    let y_max = max_time * 1.1;
-    let y_min = min_time.min(0.0);
-    let x_max = target.ssh_history.len() as f64;
-
-    let y_labels: Vec<String> = (0..=5)
-        .map(|i| format!("{:.1}", y_min + (y_max - y_min) * i as f64 / 5.0))
-        .collect();
-
-    let x_labels: Vec<String> = (0..=5)
-        .map(|i| format!("{:.0}", x_max * i as f64 / 5.0))
-        .collect();
-
-    let chart = Chart::new(datasets)
-        .block(
-            Block::default()
-                .title("SSH Connection Time (ms) - Press 'p' to cycle views")
-                .borders(Borders::ALL),
-        )
-        .x_axis(
-            Axis::default()
-                .title("Time (samples)")
-                .style(Style::default().fg(Color::Gray))
-                .bounds([0.0, x_max])
-                .labels(x_labels.iter().map(|s| s.as_str()).collect::<Vec<_>>()),
-        )
-        .y_axis(
-            Axis::default()
-                .title("Connection Time (ms)")
                 .style(Style::default().fg(Color::Gray))
                 .bounds([y_min, y_max])
                 .labels(y_labels.iter().map(|s| s.as_str()).collect::<Vec<_>>()),
