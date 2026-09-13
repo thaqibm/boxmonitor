@@ -13,5 +13,7 @@ cargo build --locked --lib --release --target wasm32-unknown-unknown
 mkdir -p build/site/pkg
 wasm-bindgen target/wasm32-unknown-unknown/release/boxmonitor.wasm --target web --out-dir build/site/pkg --no-typescript
 cp web/index.html web/style.css web/app.js build/site/
+mkdir -p build/site/fonts
+cp web/fonts/* build/site/fonts/
 touch build/site/.nojekyll
 printf 'Built static demo in build/site\n'

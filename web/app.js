@@ -81,6 +81,7 @@ document.addEventListener('keydown', event => {
   if (action) { event.preventDefault(); key(action); }
 });
 new ResizeObserver(resize).observe($('.screen-scroll'));
+document.fonts.ready.then(resize);
 
 try {
   const { default:init, Demo } = await import('./pkg/boxmonitor.js');
