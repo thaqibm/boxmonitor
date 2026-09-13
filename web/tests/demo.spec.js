@@ -1,63 +1,98 @@
 import { test, expect } from '@playwright/test';
-test('real Wasm UI: navigation, failures, recovery, pause and fresh reset', async ({ page }, info) => {
+
+async function ready(page) {
+  await page.goto('./');
+  await expect(page.getByRole('button', {name:'Next target'})).toBeEnabled();
+  await expect(page.locator('#terminal')).toContainText('All Targets Latency Overlay');
+}
+async function add(page, text) {
+  await page.getByRole('textbox').fill(text);
+  await page.getByRole('textbox').press('Enter');
+}
+
+test('minimal page, buttons, arrow keys and Vim navigation', async ({page}, info) => {
   const errors = [];
   page.on('pageerror', error => errors.push(error.message));
-  let wasmLoaded = false;
-  page.on('response', response => { if (response.url().endsWith('.wasm') && response.ok()) wasmLoaded = true; });
-  await page.goto('./');
-  await page.getByRole('button', {name:'Start demo', exact:true}).click();
-  await expect(page.locator('#status')).toHaveText('Running · Wasm');
-  expect(wasmLoaded).toBeTruthy();
-  const terminal = page.locator('#terminal');
-  await expect(terminal).toContainText('All Targets Latency Overlay');
-  await expect(terminal).toContainText('Gateway');
-  expect(await terminal.locator('span').evaluateAll(spans => new Set(spans.map(span => getComputedStyle(span).color)).size)).toBeGreaterThan(4);
-  await page.getByRole('button', {name:'Pause', exact:true}).click();
-  const count = await page.locator('#sample-count').textContent();
-  await page.waitForTimeout(1200);
-  await expect(page.locator('#sample-count')).toHaveText(count);
-  await page.getByRole('button', {name:'API outage', exact:true}).click();
-  await page.getByRole('button', {name:'P / Plot', exact:true}).click();
-  await page.getByRole('button', {name:'P / Plot', exact:true}).click();
-  await expect(terminal).toContainText('Host unreachable');
-  await expect(terminal).toContainText('Recent Failures');
-  for (let i = 0; i < 3; i++) await page.getByRole('button', {name:'→ Next', exact:true}).click();
-  await expect(terminal).toContainText('Target: API');
-  await expect(terminal).toContainText('Success:');
-  await expect(terminal).toContainText('Failures for API');
-  await page.screenshot({path:info.outputPath('failures.png')});
-  await terminal.press('ArrowLeft');
-  await expect(terminal).toContainText('Target: DNS');
-  await terminal.press('p');
-  await expect(terminal).toContainText('Ping Latency (ms)');
-  await page.getByRole('button', {name:'Healthy network', exact:true}).click();
-  await terminal.press(' ');
-  await expect(page.locator('#status')).toHaveText('Running · Wasm');
-  await page.getByRole('button', {name:'Reset', exact:true}).click();
-  await expect(terminal).toContainText('All Targets Latency Overlay');
-  await expect(page.locator('[data-scenario="0"]')).toHaveAttribute('aria-pressed', 'true');
-  await expect(page.locator('#sample-count')).toHaveText('60 samples');
-  await page.screenshot({path:info.outputPath('overview.png')});
+  await ready(page);
+  await expect(page.getByRole('link')).toHaveCount(0);
+  await expect(page.getByRole('button')).toHaveCount(2);
+  await page.getByRole('button', {name:'Next target'}).click();
+  await expect(page.locator('#terminal')).toContainText('Target: Gateway');
+  await page.keyboard.press('l');
+  await expect(page.locator('#terminal')).toContainText('Target: DNS');
+  await page.keyboard.press('ArrowRight');
+  await expect(page.locator('#terminal')).toContainText('Target: API');
+  await page.keyboard.press('h');
+  await expect(page.locator('#terminal')).toContainText('Target: DNS');
+  await page.keyboard.press('ArrowLeft');
+  await expect(page.locator('#terminal')).toContainText('Target: Gateway');
+  await page.getByRole('button', {name:'Previous target'}).click();
+  await expect(page.locator('#terminal')).toContainText('All Targets Overview');
+  await page.keyboard.press('p');
+  await expect(page.locator('#terminal')).toContainText('All Targets Ping Latency');
+  await page.keyboard.press('p');
+  await expect(page.locator('#terminal')).toContainText('No failures recorded');
+  await page.keyboard.press('p');
+  expect(await page.locator('#terminal span').evaluateAll(spans => new Set(spans.map(span => getComputedStyle(span).color)).size)).toBeGreaterThan(4);
+  await page.screenshot({path:info.outputPath('minimal.png')});
   expect(errors).toEqual([]);
 });
-test('mobile viewport contains page; terminal scrolls and controls work', async ({page}, info) => {
-  await page.setViewportSize({width:390, height:844});
-  await page.goto('./');
-  await page.getByRole('button', {name:'Start demo', exact:true}).click();
-  await expect(page.locator('#status')).toHaveText('Running · Wasm');
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
-  await page.getByRole('button', {name:'Latency & packet loss', exact:true}).click();
-  await page.getByRole('button', {name:'P / Plot', exact:true}).click();
-  await page.getByRole('button', {name:'P / Plot', exact:true}).click();
-  await expect(page.locator('#terminal')).toContainText('Request timeout');
-  await page.screenshot({path:info.outputPath('mobile.png'), fullPage:true});
+
+test('add named URLs and hosts, keep updating beyond four targets, validate input', async ({page}, info) => {
+  const errors = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await ready(page);
+  await add(page, 'My API = https://example.com/v1?health=1');
+  await expect(page.locator('#terminal')).toContainText('Target: My API (example.com)');
+  await expect(page.getByRole('textbox')).toHaveValue('');
+  await page.waitForTimeout(1200);
+  await expect(page.locator('#terminal')).toContainText('Mean:');
+  // Typing Vim keys and moving the input caret must not navigate the monitor.
+  await page.getByRole('textbox').fill('hello');
+  await page.getByRole('textbox').press('ArrowLeft');
+  await page.getByRole('textbox').press('h');
+  await expect(page.locator('#terminal')).toContainText('Target: My API');
+  await add(page, 'Router = 10.0.0.1');
+  await expect(page.locator('#terminal')).toContainText('Target: Router (10.0.0.1)');
+  await add(page, 'https://www.example.org/path?q=1');
+  await expect(page.locator('#terminal')).toContainText('Target: www.example.org (www.example.org)');
+  await add(page, 'Local = localhost');
+  await expect(page.locator('#terminal')).toContainText('Target: Local (localhost)');
+  await add(page, 'IPv6 = [::1]');
+  await expect(page.locator('#terminal')).toContainText('Target: IPv6 ([::1])');
+  await add(page, 'Duplicate = https://EXAMPLE.COM/path');
+  await expect(page.locator('#status')).toContainText('already');
+  await add(page, 'Bad = ftp://example.net');
+  await expect(page.locator('#status')).toContainText('HTTP(S)');
+  await add(page, 'not a host');
+  await expect(page.locator('#status')).toHaveClass('error');
+  await add(page, 'Bad = https://user:password@example.net');
+  await expect(page.locator('#status')).toContainText('credentials');
+  for (let i=0;i<7;i++) await add(page, `Host ${i} = host${i}.example`);
+  await add(page, 'Overflow = overflow.example');
+  await expect(page.locator('#status')).toContainText('16 hosts');
+  await page.getByRole('button', {name:'Next target'}).click();
+  await expect(page.locator('#terminal')).toContainText('Monitoring 16 targets');
+  await page.screenshot({path:info.outputPath('added-hosts.png')});
+  expect(errors).toEqual([]);
 });
-test('failed Wasm download offers a working retry', async ({page}) => {
+
+test('mobile stays within viewport and can add a host', async ({page}, info) => {
+  await page.setViewportSize({width:390,height:844});
+  await ready(page);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBeTruthy();
+  await add(page, 'Home = home.example');
+  await expect(page.locator('#terminal')).toContainText('Target: Home');
+  await page.getByRole('button', {name:'Previous target'}).click();
+  await expect(page.locator('#terminal')).toContainText('Target: Edge');
+  await page.screenshot({path:info.outputPath('mobile.png'),fullPage:true});
+});
+
+test('failed Wasm load gives clear reload recovery', async ({page}) => {
   await page.route('**/*.wasm', route => route.abort());
   await page.goto('./');
-  await page.getByRole('button', {name:'Start demo', exact:true}).click();
-  await expect(page.getByRole('button', {name:'Retry', exact:true})).toBeEnabled();
+  await expect(page.locator('#status')).toContainText('Reload');
+  await expect(page.getByRole('textbox')).toBeDisabled();
   await page.unroute('**/*.wasm');
-  await page.getByRole('button', {name:'Retry', exact:true}).click();
-  await expect(page.locator('#status')).toHaveText('Running · Wasm');
+  await ready(page);
 });

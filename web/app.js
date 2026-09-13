@@ -1,7 +1,7 @@
 const $ = (selector) => document.querySelector(selector);
 const terminal = $('#terminal');
 const status = $('#status');
-let demo, timer, paused = false, loading = false;
+let demo;
 let columns = 100;
 const rows = 36;
 
@@ -29,7 +29,6 @@ function draw() {
     fragment.append(line);
   }
   terminal.replaceChildren(fragment);
-  $('#sample-count').textContent = `${demo.samples()} samples`;
 }
 function resize() {
   // Measure the actual terminal font instead of assuming a character width.
@@ -41,50 +40,57 @@ function resize() {
   columns = Math.max(80, Math.min(180, Math.floor(($('.screen-scroll').clientWidth - 24) / width)));
   draw();
 }
-function updateStatus() {
-  status.textContent = paused ? 'Paused · Wasm' : 'Running · Wasm';
-  $('#pause').textContent = paused ? 'Resume' : 'Pause';
+
+function message(text, error = false) {
+  status.textContent = text;
+  status.classList.toggle('error', error);
 }
-function togglePause() { if (!demo) return; paused = !paused; updateStatus(); }
-function key(action) { if (!demo) return; demo.key(action); draw(); }
-async function start() {
-  if (loading) return;
-  loading = true;
-  $('#start').disabled = true;
-  status.textContent = 'Loading WebAssembly…';
+function key(action) { if (demo) { demo.key(action); draw(); } }
+
+function parseHost(value) {
+  const separator = value.indexOf('=');
+  // An equals sign in a URL query is not a name separator.
+  const named = separator >= 0 && !/^https?:\/\//i.test(value);
+  const raw = (named ? value.slice(separator + 1) : value).trim();
+  let name = named ? value.slice(0, separator).trim() : '';
+  if (!raw || /\s/.test(raw)) throw new Error('Enter a host or HTTP(S) URL, optionally preceded by Name =');
+  const url = new URL(raw.includes('://') ? raw : `https://${raw}`);
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('Use a host or HTTP(S) URL without credentials.');
+  const host = url.hostname.replace(/\.$/, '').toLowerCase();
+  if (!host || (!host.startsWith('[') && !host.split('.').every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label)))) throw new Error('Enter a valid hostname or IP address.');
+  if (!name) name = host.slice(0, 40);
+  if (!/^[\x20-\x7e]{1,40}$/.test(name)) throw new Error('Use a name of 1–40 printable ASCII characters.');
+  return { host, name };
+}
+
+$('#add-host').addEventListener('submit', event => {
+  event.preventDefault();
+  if (!demo) return;
   try {
-    const { default: init, Demo } = await import('./pkg/boxmonitor.js');
-    await init();
-    demo?.free();
-    demo = new Demo();
-    paused = false;
-    clearInterval(timer);
-    timer = setInterval(() => { if (!paused) { demo.tick(); draw(); } }, 1000);
-    document.querySelectorAll('[data-key], [data-scenario], #pause, #reset').forEach(button => button.disabled = false);
-    document.querySelectorAll('[data-scenario]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.scenario === '0')));
-    $('#start').textContent = 'Started';
-    resize(); updateStatus(); terminal.focus({preventScroll:true});
-  } catch (error) {
-    status.textContent = 'Could not load demo. Select Retry.';
-    terminal.textContent = `WebAssembly failed to load. Check your connection and try again.\n\n${error.message}`;
-    $('#start').textContent = 'Retry';
-    $('#start').disabled = false;
-  } finally { loading = false; }
-}
-$('#start').addEventListener('click', start);
-$('#reset').addEventListener('click', start);
-$('#pause').addEventListener('click', togglePause);
+    const {host, name} = parseHost($('#host').value.trim());
+    demo.add_target(host, name);
+    $('#host').value = '';
+    message(`Added ${name} (${host}) · simulated`);
+    draw();
+  } catch (error) { message(typeof error === 'string' ? error : error.message, true); }
+});
 document.querySelectorAll('[data-key]').forEach(button => button.addEventListener('click', () => key(button.dataset.key)));
-document.querySelectorAll('[data-scenario]').forEach(button => button.addEventListener('click', () => {
-  demo.set_scenario(Number(button.dataset.scenario));
-  document.querySelectorAll('[data-scenario]').forEach(other => other.setAttribute('aria-pressed', String(other === button)));
-  // Advance once immediately so the scenario has visible feedback, even when paused.
-  demo.tick(); draw();
-}));
-terminal.addEventListener('keydown', event => {
-  if (event.key === 'ArrowRight') { event.preventDefault(); key('next'); }
-  else if (event.key === 'ArrowLeft') { event.preventDefault(); key('previous'); }
-  else if (event.key.toLowerCase() === 'p') { event.preventDefault(); key('plot'); }
-  else if (event.key === ' ') { event.preventDefault(); togglePause(); }
+document.addEventListener('keydown', event => {
+  if (event.target.closest('input, textarea, [contenteditable]') || event.ctrlKey || event.metaKey || event.altKey) return;
+  const action = { ArrowRight:'next', l:'next', ArrowLeft:'previous', h:'previous', p:'plot' }[event.key];
+  if (action) { event.preventDefault(); key(action); }
 });
 new ResizeObserver(resize).observe($('.screen-scroll'));
+
+try {
+  const { default:init, Demo } = await import('./pkg/boxmonitor.js');
+  await init();
+  demo = new Demo();
+  document.querySelectorAll('button, input').forEach(control => control.disabled = false);
+  resize();
+  message('');
+  setInterval(() => { demo.tick(); draw(); }, 1000);
+} catch {
+  message('Could not load the demo. Reload the page to retry.', true);
+  terminal.textContent = 'WebAssembly could not load.';
+}

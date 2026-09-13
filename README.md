@@ -65,19 +65,24 @@ cargo build --release
 
 ## Browser demo
 
-The browser demo compiles the **same Rust statistics and Ratatui widgets** to
-WebAssembly. Its white page and command sidebar follow the OS browser demo,
-with a full-color terminal. It runs entirely on a static host, including
-GitHub Pages, without QEMU, a backend, or cross-origin isolation headers.
+[Open the browser demo](https://thaqibm.github.io/boxmonitor/).
 
-Browsers cannot send raw ICMP packets. This demo uses deterministic synthetic
-samples for four documentation-only IP addresses. Healthy traffic, latency /
-packet loss, and an API outage exercise the real charts and failure views.
-The initial window contains 60 samples; one new sample arrives per second and
-latency history retains 100 samples. Failure logs independently retain the
-last 100 failures per target, matching the native app. Scenario selection adds
-one sample immediately, including while paused. Reset restores the initial
-healthy window. No real hosts are contacted by the monitor.
+The same Rust statistics and Ratatui widgets compile to WebAssembly. The page
+opens automatically, with a colored monitor, two navigation buttons, and one
+input. Use **< / >**, arrow keys, or **h / l** to switch targets; **p** cycles
+plots. Keyboard shortcuts do not intercept typing in the input.
+
+Enter `Name = example.com`, `Name = https://example.com/path`, or a bare host /
+HTTP(S) URL, then press Enter to add it. URLs are reduced to their hostname.
+Names accept 1–40 printable ASCII characters. Duplicate hosts are rejected;
+up to 16 total targets are supported, including the four initial examples.
+Added targets start collecting immediately and exist until the page reloads.
+On small screens the terminal scrolls horizontally.
+
+**All traffic is simulated, including added hosts.** Browsers cannot send raw
+ICMP packets. This static demo makes no monitoring requests to entered hosts.
+It starts with 60 synthetic samples and adds one sample per second, retaining
+100 latency samples per target. The native app performs real ICMP monitoring.
 
 ### Build and run
 
@@ -88,13 +93,8 @@ cargo install wasm-bindgen-cli --version 0.2.104 --locked
 node web/server.mjs
 ```
 
-Open <http://127.0.0.1:8091/boxmonitor/> and select **Start demo**.
-Use the sidebar buttons or focus the terminal and press Left / Right to switch
-targets, **P** to cycle plots, and **Space** to pause. Tab retains normal browser
-focus navigation. On small screens the terminal scrolls horizontally.
-
-The generated static files are in `build/site`. All asset URLs are relative
-so the demo also works under a GitHub Pages repository prefix.
+Open <http://127.0.0.1:8091/boxmonitor/>. Generated files are in `build/site`;
+relative asset URLs support GitHub Pages repository prefixes.
 
 ### Verify
 
@@ -107,13 +107,11 @@ npx playwright install chromium firefox
 npm test
 ```
 
-The browser tests load the actual Wasm binary in Chromium and Firefox, check
-colored output, target / plot navigation, failure scenarios, pause / reset,
-mobile layout, and retry after a failed Wasm download.
+Browser checks cover automatic Wasm startup, color, navigation, named host
+addition, URL parsing, validation, continued updates, mobile layout, and
+recovery from a failed Wasm download in Chromium and Firefox.
 
 ### GitHub Pages
 
 The `Browser demo` workflow builds and tests on GitHub-hosted Ubuntu runners.
-Pull requests validate only; successful pushes to `main` or manual runs on
-`main` deploy `build/site`. In repository **Settings → Pages**, select
-**GitHub Actions** as the source before the first deployment.
+Successful pushes to `main` deploy `build/site` through GitHub Actions.

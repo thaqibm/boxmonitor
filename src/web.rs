@@ -63,7 +63,7 @@ impl Demo {
         for (i, target) in self.targets.iter_mut().enumerate() {
             let phase = t as f64 * 0.23 + i as f64 * 1.7;
             let jitter = ((t.wrapping_mul(17) + i as u32 * 31) % 13) as f64 / 4.0;
-            let base = [3.0, 14.0, 30.0, 49.0][i];
+            let base = [3.0, 14.0, 30.0, 49.0][i % 4];
             let failed = match self.scenario {
                 1 => i >= 2 && t % 5 < 2,
                 2 => i == 2,
@@ -90,7 +90,7 @@ impl Demo {
                         }
                         .into()
                     }),
-                    resolved_ip: Some(target.target.address.parse().unwrap()),
+                    resolved_ip: target.target.address.parse().ok(),
                 },
                 100,
             );
@@ -100,6 +100,44 @@ impl Demo {
             }
         }
         self.sample += 1;
+    }
+
+    /// Add a named simulation target without opening any network connection.
+    pub fn add_target(&mut self, address: &str, name: &str) -> Result<(), JsValue> {
+        if self.targets.len() >= 16 {
+            return Err(JsValue::from_str("Up to 16 hosts can be added."));
+        }
+        if address.is_empty()
+            || address.len() > 253
+            || !address.is_ascii()
+            || address.chars().any(|c| c.is_whitespace() || c.is_control())
+            || name.is_empty()
+            || name.len() > 40
+            || !name.is_ascii()
+            || name.chars().any(|c| c.is_control())
+        {
+            return Err(JsValue::from_str(
+                "Use a valid host and a name of 1–40 plain-text characters.",
+            ));
+        }
+        if self
+            .targets
+            .iter()
+            .any(|target| target.target.address.eq_ignore_ascii_case(address))
+        {
+            return Err(JsValue::from_str("That host is already in the monitor."));
+        }
+        self.targets.push(TargetStats::new(
+            Target {
+                address: address.into(),
+                name: Some(name.into()),
+            },
+            100,
+        ));
+        self.app.current_tab = self.targets.len();
+        self.app.tab_mode = TabMode::Individual(self.targets.len() - 1);
+        self.tick();
+        Ok(())
     }
 
     pub fn set_scenario(&mut self, scenario: u8) {

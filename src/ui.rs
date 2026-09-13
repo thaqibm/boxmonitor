@@ -300,7 +300,7 @@ fn render_all_targets_info(f: &mut Frame, area: Rect, targets: &[TargetStats]) {
             Style::default().fg(Color::Cyan),
         ),
         Span::raw(if cfg!(target_arch = "wasm32") {
-            " - Left/Right: targets | P: plots | Space: pause"
+            " - Left/Right or h/l: targets | P: plots"
         } else {
             " - Use Tab/Shift+Tab to switch views, 'p' to cycle plot types"
         }),
