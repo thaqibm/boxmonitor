@@ -1,8 +1,12 @@
+#[cfg(not(target_arch = "wasm32"))]
 use color_eyre::Result;
 use serde::{Deserialize, Serialize};
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
+#[cfg(not(target_arch = "wasm32"))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub targets: Vec<Target>,
@@ -17,6 +21,7 @@ pub struct Target {
     pub name: Option<String>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -36,6 +41,7 @@ impl Default for Config {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn get_config_dir() -> Result<PathBuf> {
     let home =
         dirs::home_dir().ok_or_else(|| color_eyre::eyre::eyre!("Could not find home directory"))?;
@@ -43,6 +49,7 @@ pub fn get_config_dir() -> Result<PathBuf> {
     Ok(config_dir)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn load_config() -> Result<Config> {
     let config_dir = get_config_dir()?;
     let config_file = config_dir.join(".iplist");
@@ -58,6 +65,7 @@ pub fn load_config() -> Result<Config> {
     Ok(config)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn save_config(config: &Config) -> Result<()> {
     let config_dir = get_config_dir()?;
     fs::create_dir_all(&config_dir)?;
@@ -68,6 +76,7 @@ pub fn save_config(config: &Config) -> Result<()> {
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn load_targets_from_simple_list() -> Result<Vec<Target>> {
     let config_dir = get_config_dir()?;
     let iplist_file = config_dir.join(".iplist");
@@ -102,6 +111,7 @@ pub fn load_targets_from_simple_list() -> Result<Vec<Target>> {
     Ok(targets)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn parse_targets_from_args(ip_list: Option<String>) -> Result<Vec<Target>> {
     let mut targets = Vec::new();
 

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <title>BoxMonitor / Browser demo</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='3' width='26' height='26' fill='%23131820' stroke='%235ac8bd'/%3E%3Cpath d='M6 20h5l3-10 4 14 3-8h5' fill='none' stroke='%235ac8bd' stroke-width='2'/%3E%3C/svg%3E">
+  <script type="module" src="./app.js"></script>
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+<main>
+  <header><h1>BoxMonitor <span>/ Browser demo</span></h1><p>A terminal network monitor, compiled from Rust to WebAssembly.</p></header>
+  <div class="layout">
+    <section class="machine" aria-label="BoxMonitor demo">
+      <div class="controls"><button id="start">Start demo</button><button id="pause" disabled>Pause</button><button id="reset" disabled>Reset</button><span id="status" role="status">Ready to start.</span></div>
+      <div class="screen-scroll" tabindex="0" role="region" aria-label="Scrollable terminal"><pre id="terminal" tabindex="0" aria-label="Interactive BoxMonitor terminal. Use left and right arrows to select a target, P to change chart, and Space to pause.">BoxMonitor
+
+Select Start demo to open the monitor.
+
+Rust / Ratatui / WebAssembly
+Simulated network · no packets sent</pre></div>
+      <div class="caption"><span>Simulated traffic · 1 sample / second · 100-sample history</span><span id="sample-count">0 samples</span></div>
+      <div class="legend" aria-label="Target colors"><span class="gateway">— Gateway</span><span class="dns">— DNS</span><span class="api">— API</span><span class="edge">— Edge</span></div>
+    </section>
+    <aside>
+      <h2>Try a scenario</h2>
+      <p>Change the traffic while the monitor runs.</p>
+      <div class="scenarios" role="group" aria-label="Traffic scenario">
+        <button data-scenario="0" aria-pressed="true" disabled>Healthy network</button>
+        <button data-scenario="1" aria-pressed="false" disabled>Latency &amp; packet loss</button>
+        <button data-scenario="2" aria-pressed="false" disabled>API outage</button>
+      </div>
+      <h2>Controls</h2>
+      <dl class="commands">
+        <div><dt><button data-key="next" disabled>→ Next</button></dt><dd>Inspect an individual target.</dd></div>
+        <div><dt><button data-key="previous" disabled>← Back</button></dt><dd>Return to the previous target.</dd></div>
+        <div><dt><button data-key="plot" disabled>P / Plot</button></dt><dd>Cycle overlay, latency, and failures.</dd></div>
+        <div><dt><kbd>Space</kbd></dt><dd>Pause or resume the samples.</dd></div>
+      </dl>
+      <h2>What it does</h2><p>Compare latency across hosts, inspect percentiles, and trace failures. The colored terminal is rendered by the project’s Rust Ratatui widgets.</p>
+      <h2>What it targets</h2><p>The native app monitors IP addresses and domains using ICMP and DNS. This browser demo supplies synthetic data because browsers cannot open raw ICMP sockets.</p>
+      <p class="source"><a href="https://github.com/thaqibm/boxmonitor">Source on GitHub ↗</a></p>
+    </aside>
+  </div>
+  <section class="guide"><h2>A quick walkthrough</h2><div class="examples">
+    <article><span class="number">01</span><h3>Compare hosts</h3><p>Start with the overview. Four colored traces show a local gateway, DNS resolver, API, and edge host. The demo begins with 60 simulated samples.</p></article>
+    <article><span class="number">02</span><h3>Inspect a distribution</h3><p>Choose <strong>Next</strong> to see one target’s mean, median, range, success rate, and percentile chart.</p></article>
+    <article><span class="number">03</span><h3>Watch a failure</h3><p>Select <strong>API outage</strong>, then cycle <strong>Plot</strong> twice to see failure counts and logs. Select Healthy network to recover.</p></article>
+  </div></section>
+  <footer><span>Runs locally in your browser. No server or account required.</span><span>Rust → Wasm</span></footer>
+</main>
+</body>
+</html>

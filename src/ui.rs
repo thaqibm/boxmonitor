@@ -2,23 +2,32 @@ use crate::monitor::{Statistics, TargetStats};
 use crate::ui_failure_charts::{
     render_all_targets_failure_chart, render_single_target_failure_chart,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use color_eyre::Result;
+#[cfg(not(target_arch = "wasm32"))]
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use ratatui::{
-    Frame, Terminal,
-    backend::{Backend, CrosstermBackend},
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Style},
     symbols,
     text::{Line, Span},
     widgets::{Axis, Block, Borders, Chart, Dataset, GraphType, List, ListItem, Paragraph, Tabs},
 };
+#[cfg(not(target_arch = "wasm32"))]
+use ratatui::{
+    Terminal,
+    backend::{Backend, CrosstermBackend},
+};
+#[cfg(not(target_arch = "wasm32"))]
 use std::io;
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 use tokio::sync::Mutex;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -35,14 +44,17 @@ pub enum TabMode {
 }
 
 pub struct App {
+    #[cfg(not(target_arch = "wasm32"))]
     pub should_quit: bool,
     pub current_tab: usize,
     pub current_plot_view: PlotView,
     pub tab_mode: TabMode,
+    #[cfg(not(target_arch = "wasm32"))]
     pub targets: Arc<Mutex<Vec<TargetStats>>>,
 }
 
 impl App {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(targets: Arc<Mutex<Vec<TargetStats>>>) -> Self {
         Self {
             should_quit: false,
@@ -86,6 +98,7 @@ impl App {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub async fn run_ui(targets: Arc<Mutex<Vec<TargetStats>>>) -> Result<()> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -111,6 +124,7 @@ pub async fn run_ui(targets: Arc<Mutex<Vec<TargetStats>>>) -> Result<()> {
     Ok(())
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Result<()> {
     loop {
         let targets = app.targets.lock().await;
@@ -154,7 +168,7 @@ async fn run_app<B: Backend>(terminal: &mut Terminal<B>, app: &mut App) -> Resul
     Ok(())
 }
 
-fn ui(f: &mut Frame, app: &App, targets: &[TargetStats]) {
+pub(crate) fn ui(f: &mut Frame, app: &App, targets: &[TargetStats]) {
     let size = f.area();
 
     if targets.is_empty() {
@@ -285,7 +299,11 @@ fn render_all_targets_info(f: &mut Frame, area: Rect, targets: &[TargetStats]) {
             format!("{} targets", targets.len()),
             Style::default().fg(Color::Cyan),
         ),
-        Span::raw(" - Use Tab/Shift+Tab to switch views, 'p' to cycle plot types"),
+        Span::raw(if cfg!(target_arch = "wasm32") {
+            " - Left/Right: targets | P: plots | Space: pause"
+        } else {
+            " - Use Tab/Shift+Tab to switch views, 'p' to cycle plot types"
+        }),
     ])];
 
     let paragraph = Paragraph::new(info_text).block(

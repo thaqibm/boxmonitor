@@ -1,0 +1,10 @@
+{
+  "name": "boxmonitor-browser-demo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "../scripts/build-web.sh",
+    "test": "playwright test"
+  },
+  "devDependencies": { "@playwright/test": "1.55.0" }
+}

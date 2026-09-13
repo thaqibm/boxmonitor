@@ -1,1 +1,5 @@
 /target
+/build/
+/web/node_modules/
+/web/test-results/
+/web/playwright-report/

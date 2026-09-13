@@ -19,8 +19,12 @@ pub fn render_all_targets_failure_chart(f: &mut Frame, area: Rect, targets: &[Ta
 
     // Split the area into two parts: bar chart on left, failure log on right
     let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .direction(if area.width < 110 {
+            Direction::Vertical
+        } else {
+            Direction::Horizontal
+        })
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
         .split(area);
 
     // Aggregate failure reasons across all targets
@@ -102,7 +106,8 @@ fn render_failure_bar_chart(f: &mut Frame, area: Rect, failure_counts: &HashMap<
                 .borders(Borders::ALL),
         )
         .data(&bar_data_refs)
-        .bar_width(3)
+        .direction(Direction::Horizontal)
+        .bar_width(1)
         .bar_gap(2) // Add spacing between bars
         .bar_style(Style::default().fg(Color::Red))
         .value_style(Style::default().fg(Color::Black).bg(Color::Red))
@@ -162,8 +167,12 @@ pub fn render_single_target_failure_chart(f: &mut Frame, area: Rect, target: &Ta
 
     // Split the area into two parts: bar chart on left, failure log on right
     let chunks = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(60), Constraint::Percentage(40)])
+        .direction(if area.width < 110 {
+            Direction::Vertical
+        } else {
+            Direction::Horizontal
+        })
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
         .split(area);
 
     // Count failure reasons for this target
@@ -241,7 +250,8 @@ fn render_single_target_bar_chart(
     let barchart = BarChart::default()
         .block(Block::default().title(title).borders(Borders::ALL))
         .data(&bar_data_refs)
-        .bar_width(3)
+        .direction(Direction::Horizontal)
+        .bar_width(1)
         .bar_gap(2) // Add spacing between bars
         .bar_style(Style::default().fg(Color::Red))
         .value_style(Style::default().fg(Color::Black).bg(Color::Red))

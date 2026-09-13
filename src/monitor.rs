@@ -1,8 +1,10 @@
 use crate::config::Target;
 use chrono::{DateTime, Utc};
+#[cfg(not(target_arch = "wasm32"))]
 use color_eyre::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+#[cfg(not(target_arch = "wasm32"))]
 use std::hash::{Hash, Hasher};
 use std::net::IpAddr;
 
@@ -92,6 +94,7 @@ impl TargetStats {
             .filter_map(|r| r.latency_ms)
             .collect();
 
+        self.ping_stats = None;
         if !successful_pings.is_empty() {
             self.ping_stats = Some(calculate_statistics(
                 &successful_pings,
@@ -101,12 +104,14 @@ impl TargetStats {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub struct Monitor {
     targets: Vec<TargetStats>,
     history_size: usize,
     debug_logging: bool,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl Monitor {
     pub fn new(
         targets: Vec<Target>,
@@ -154,6 +159,7 @@ impl Monitor {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn ping_target(host: &str) -> PingResult {
     let timestamp = Utc::now();
 
@@ -208,6 +214,7 @@ async fn ping_target(host: &str) -> PingResult {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 async fn resolve_host_to_ip(host: &str) -> Result<IpAddr, String> {
     if let Ok(addr) = host.parse::<IpAddr>() {
         return Ok(addr);
@@ -279,6 +286,7 @@ fn percentile(sorted_values: &[f64], p: f64) -> f64 {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn log_ping_result(target: &str, result: &PingResult) {
     let resolved = result
         .resolved_ip
@@ -309,8 +317,56 @@ fn log_ping_result(target: &str, result: &PingResult) {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn unique_identifier(host: &str) -> u16 {
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
     host.hash(&mut hasher);
     (hasher.finish() & 0xFFFF) as u16
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn interpolated_percentiles_and_packet_loss() {
+        let stats = calculate_statistics(&[10.0, 20.0, 30.0, 40.0], 5);
+        assert_eq!(stats.mean, 25.0);
+        assert_eq!(stats.median, 25.0);
+        assert_eq!(stats.p25, 17.5);
+        assert_eq!(stats.p95, 38.5);
+        assert_eq!(stats.success_rate, 80.0);
+    }
+
+    #[test]
+    fn outage_expires_successful_statistics_and_recovers() {
+        let mut target = TargetStats::new(
+            Target {
+                address: "192.0.2.1".into(),
+                name: None,
+            },
+            2,
+        );
+        let result = |latency| PingResult {
+            timestamp: Utc::now(),
+            latency_ms: latency,
+            success: latency.is_some(),
+            failure_reason: latency.is_none().then(|| "timeout".into()),
+            resolved_ip: None,
+        };
+        target.add_ping_result(result(Some(10.0)), 2);
+        target.add_ping_result(result(None), 2);
+        assert_eq!(target.ping_stats.as_ref().unwrap().success_rate, 50.0);
+        target.add_ping_result(result(None), 2);
+        assert!(
+            target.ping_stats.is_none(),
+            "expired successes must not leave stale stats"
+        );
+        assert_eq!(target.ping_history.len(), 2);
+        target.add_ping_result(result(None), 2);
+        assert_eq!(target.failure_log.len(), 2);
+        target.add_ping_result(result(Some(20.0)), 2);
+        assert_eq!(target.ping_stats.as_ref().unwrap().mean, 20.0);
+        assert_eq!(target.ping_stats.as_ref().unwrap().success_rate, 50.0);
+    }
 }

@@ -62,3 +62,58 @@ cargo build --release
 - tokio - Async runtime
 - surge-ping - ICMP ping implementation
 - crossterm - Terminal handling
+
+## Browser demo
+
+The browser demo compiles the **same Rust statistics and Ratatui widgets** to
+WebAssembly. Its white page and command sidebar follow the OS browser demo,
+with a full-color terminal. It runs entirely on a static host, including
+GitHub Pages, without QEMU, a backend, or cross-origin isolation headers.
+
+Browsers cannot send raw ICMP packets. This demo uses deterministic synthetic
+samples for four documentation-only IP addresses. Healthy traffic, latency /
+packet loss, and an API outage exercise the real charts and failure views.
+The initial window contains 60 samples; one new sample arrives per second and
+latency history retains 100 samples. Failure logs independently retain the
+last 100 failures per target, matching the native app. Scenario selection adds
+one sample immediately, including while paused. Reset restores the initial
+healthy window. No real hosts are contacted by the monitor.
+
+### Build and run
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.104 --locked
+./scripts/build-web.sh
+node web/server.mjs
+```
+
+Open <http://127.0.0.1:8091/boxmonitor/> and select **Start demo**.
+Use the sidebar buttons or focus the terminal and press Left / Right to switch
+targets, **P** to cycle plots, and **Space** to pause. Tab retains normal browser
+focus navigation. On small screens the terminal scrolls horizontally.
+
+The generated static files are in `build/site`. All asset URLs are relative
+so the demo also works under a GitHub Pages repository prefix.
+
+### Verify
+
+```bash
+cargo test --locked
+cargo check --locked --bin boxmonitor
+npm --prefix web ci
+cd web
+npx playwright install chromium firefox
+npm test
+```
+
+The browser tests load the actual Wasm binary in Chromium and Firefox, check
+colored output, target / plot navigation, failure scenarios, pause / reset,
+mobile layout, and retry after a failed Wasm download.
+
+### GitHub Pages
+
+The `Browser demo` workflow builds and tests on GitHub-hosted Ubuntu runners.
+Pull requests validate only; successful pushes to `main` or manual runs on
+`main` deploy `build/site`. In repository **Settings → Pages**, select
+**GitHub Actions** as the source before the first deployment.
