@@ -96,3 +96,20 @@ test('failed Wasm load gives clear reload recovery', async ({page}) => {
   await page.unroute('**/*.wasm');
   await ready(page);
 });
+
+test('adding from failure view opens latency and keeps cells mounted on tick', async ({page}) => {
+  await ready(page);
+  await page.locator('#terminal').focus();
+  await page.keyboard.press('p');
+  await page.keyboard.press('p');
+  await expect(page.locator('#terminal')).toContainText('No failures recorded');
+  await add(page, 'Google = google.com');
+  await expect(page.locator('#terminal')).toContainText('Target: Google (google.com)');
+  await expect(page.locator('#terminal')).toContainText('Ping Latency (ms)');
+  await expect(page.locator('#terminal')).toBeFocused();
+  await page.locator('#terminal .cell').first().evaluate(cell => { window.originalCell = cell; });
+  await page.waitForTimeout(1200);
+  expect(await page.evaluate(() => window.originalCell === document.querySelector('#terminal .cell'))).toBeTruthy();
+  await page.keyboard.press('h');
+  await expect(page.locator('#terminal')).toContainText('Target: Edge');
+});

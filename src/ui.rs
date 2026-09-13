@@ -396,7 +396,11 @@ fn render_ping_chart(f: &mut Frame, area: Rect, target: &TargetStats) {
             .name("Ping")
             .marker(symbols::Marker::Braille)
             .style(Style::default().fg(Color::White))
-            .graph_type(GraphType::Line)
+            .graph_type(if ping_data.len() == 1 {
+                GraphType::Scatter
+            } else {
+                GraphType::Line
+            })
             .data(&ping_data),
     ];
 

@@ -134,6 +134,7 @@ impl Demo {
             },
             100,
         ));
+        self.app.current_plot_view = PlotView::PingOnly;
         self.app.current_tab = self.targets.len();
         self.app.tab_mode = TabMode::Individual(self.targets.len() - 1);
         self.tick();

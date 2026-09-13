@@ -5,30 +5,43 @@ let demo;
 let columns = 100;
 const rows = 36;
 
+// Keep the terminal cells mounted across ticks instead of replacing the entire
+// display. This also preserves a stable layout while web fonts finish loading.
+let grid = [];
 function draw() {
   if (!demo) return;
-  const fragment = document.createDocumentFragment();
-  for (const runs of JSON.parse(demo.render(columns, rows))) {
-    const line = document.createElement('div');
-    line.className = 'line';
-    for (const [text, fg, bg, bold] of runs) {
-      const span = document.createElement('span');
-      // Browser fallback fonts can give braille a different advance than ASCII.
-      // Give every Ratatui cell exactly one monospace column.
-      for (const symbol of text) {
-        const cell = document.createElement('i');
+  const lines = JSON.parse(demo.render(columns, rows));
+  if (grid.length !== rows || grid[0]?.length !== columns) {
+    const fragment = document.createDocumentFragment();
+    grid = Array.from({length:rows}, () => {
+      const line = document.createElement('div');
+      line.className = 'line';
+      const cells = Array.from({length:columns}, () => {
+        const cell = document.createElement('span');
         cell.className = 'cell';
-        cell.textContent = symbol;
-        span.append(cell);
-      }
-      span.style.color = fg;
-      if (bg !== 'inherit') span.style.backgroundColor = bg;
-      if (bold) span.style.fontWeight = 'bold';
-      line.append(span);
-    }
-    fragment.append(line);
+        line.append(cell);
+        return cell;
+      });
+      fragment.append(line);
+      return cells;
+    });
+    terminal.replaceChildren(fragment);
   }
-  terminal.replaceChildren(fragment);
+  for (let y = 0; y < lines.length; y++) {
+    let x = 0;
+    for (const [text, fg, bg, bold] of lines[y]) {
+      for (const symbol of text) {
+        const cell = grid[y][x++];
+        if (!cell) continue;
+        if (cell.textContent !== symbol) cell.textContent = symbol;
+        const background = bg === 'inherit' ? 'transparent' : bg;
+        const weight = bold ? 'bold' : 'normal';
+        if (cell.style.color !== fg) cell.style.color = fg;
+        if (cell.style.backgroundColor !== background) cell.style.backgroundColor = background;
+        if (cell.style.fontWeight !== weight) cell.style.fontWeight = weight;
+      }
+    }
+  }
 }
 function resize() {
   // Measure the actual terminal font instead of assuming a character width.
@@ -72,6 +85,8 @@ $('#add-host').addEventListener('submit', event => {
     $('#host').value = '';
     message(`Added ${name} (${host}) · simulated`);
     draw();
+    $('.screen-scroll').scrollLeft = 0;
+    terminal.focus({preventScroll:true});
   } catch (error) { message(typeof error === 'string' ? error : error.message, true); }
 });
 document.querySelectorAll('[data-key]').forEach(button => button.addEventListener('click', () => key(button.dataset.key)));
